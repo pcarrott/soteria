@@ -11,7 +11,6 @@ type t = {
 
 let get () =
   let crate = Crate.get_crate () in
-  (* let f (x : UllbcAst.fun_decl) = x. *)
   let is_drop ({ src; _ } : UllbcAst.fun_decl) =
     match src with
     | TraitImplFun (_, decl, _, _) ->
@@ -22,7 +21,7 @@ let get () =
   let update_drops (fun_decl : UllbcAst.fun_decl)
       ((constructors, fun_decls, drops) as lib) =
     match List.hd fun_decl.signature.inputs with
-    | TRef (_, TAdt { id }, _) ->
+    | TRef (_, TAdt { id; _ }, _) ->
         (constructors, fun_decls, Types.TypeDeclId.Map.add id fun_decl drops)
     | _ -> lib
   in
