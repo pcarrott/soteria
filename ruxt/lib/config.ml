@@ -65,6 +65,13 @@ type t = {
       [@docs Sections.frontend] [@names [ "sysroot" ]] [@env "RUST_SYSROOT"]
       (** The sysroot to use for compilation. If not provided, the default
           sysroot is used. *)
+  offline : bool;
+      [@docs Sections.frontend]
+      [@make.default false]
+      [@names [ "offline" ]]
+      [@env "SOTERIA_OFFLINE"]
+      (** Whether to compile without accessing the network, which can be useful
+          for reproducibility. This will pass --offline to Cargo.. *)
   (* Plugins *)
   with_kani : bool;
       [@docs Sections.frontend] [@make.default false] [@names [ "kani" ]]
@@ -101,14 +108,21 @@ type t = {
       [@names [ "provenance" ]]
       (** The provenance model to use for pointers. If not provided, the default
           is permissive. *)
-  recursive_validity :
+  reference_to_invalid_memory :
     (Soteria_rust_lib.Config.check_level
     [@conv Soteria_rust_lib.Config.check_level_cmdliner_conv ()]);
       [@docs Sections.analysis]
-      [@default Soteria_rust_lib.Config.Warn]
-      [@names [ "recursive-validity" ]]
+      [@default Soteria_rust_lib.Config.Allow]
+      [@names [ "reference-to-invalid-memory" ]]
       (** Whether to check the validity of the addressed memory when obtaining a
-          reference to it. We only go one level deep. *)
+          reference to it. We only go one level deep.
+
+          Referencing invalid values is not considered UB, but is bad practice
+          as it may cause UB down the line. For more information, see
+          https://github.com/rust-lang/unsafe-code-guidelines/issues/414
+
+          Enabling recursive validity checks may have a significant impact on
+          performance. *)
   approx_floating_ops :
     (Soteria_rust_lib.Config.check_level
     [@conv Soteria_rust_lib.Config.check_level_cmdliner_conv ()]);
@@ -178,6 +192,7 @@ let set_and_lock_global (config : global) =
           obol_path = "obol";
           charon_path = config.ruxt.charon_path;
           sysroot = config.ruxt.sysroot;
+          offline = config.ruxt.offline;
           test = None;
           with_kani = config.ruxt.with_kani;
           with_miri = config.ruxt.with_miri;
@@ -185,13 +200,14 @@ let set_and_lock_global (config : global) =
           filter = [];
           exclude = [];
           print_summary = config.ruxt.print_summary;
+          list_tests = false;
           show_pcs = config.ruxt.show_pcs;
           (* Ignore leaks in Soteria, we implement our own leak check *)
           ignore_leaks = true;
           (* Tree borrows are not supported *)
           ignore_aliasing = true;
           provenance = config.ruxt.provenance;
-          recursive_validity = config.ruxt.recursive_validity;
+          reference_to_invalid_memory = config.ruxt.reference_to_invalid_memory;
           approx_floating_ops = config.ruxt.approx_floating_ops;
           step_fuel = config.ruxt.step_fuel;
           branch_fuel = config.ruxt.branch_fuel;

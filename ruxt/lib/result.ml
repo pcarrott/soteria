@@ -1,11 +1,11 @@
 include Stdlib.Result
 
-let foldM ~fold xs ~init ~f =
-  Monad.foldM ~return:ok ~bind:(fun f x -> bind x f) ~fold ~init ~f xs
+let[@inline] fold (module M : Sigs.Foldable) xs ~init ~f =
+  Monad.foldM (module M) ~return:ok ~bind:(fun f x -> bind x f) ~init ~f xs
 
-let fold_list xs ~init ~f = foldM ~fold:Foldable.List.fold ~init ~f xs
-let fold_iter xs ~init ~f = foldM ~fold:Foldable.Iter.fold ~init ~f xs
-let fold_seq xs ~init ~f = foldM ~fold:Foldable.Seq.fold ~init ~f xs
+let fold_list xs ~init ~f = fold (module List) xs ~init ~f
+let fold_iter xs ~init ~f = fold (module Iter) xs ~init ~f
+let fold_seq xs ~init ~f = fold (module Seq) xs ~init ~f
 
 module Syntax = struct
   let ( let* ) = bind

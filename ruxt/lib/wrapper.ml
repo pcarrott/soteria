@@ -1,13 +1,13 @@
 open Soteria_rust_lib
 module State = Summary.State
+module Interp = Interp.Make (State)
 open State.SM.Syntax
 open Charon
-module Wpst_interp = Interp.Make (State)
 
 let exec_fun ~args fun_decl =
   let* state = State.SM.get_state () in
   let** ret, state =
-    State.SM.lift @@ Wpst_interp.exec_fun ~args ~state fun_decl
+    State.SM.lift @@ Interp.exec_fun_compo ~args ~state fun_decl
   in
   let+ () = State.SM.set_state state in
   Compo_res.ok ret
@@ -18,9 +18,9 @@ module Symok = struct
       (function Compo_res.Ok v -> v | _ -> failwith "Expected Ok in wrapper")
       res
 
-  let load ptr ty = State.load ptr ty |> unwrap
-  let store ptr ty rv = State.store ptr ty rv |> unwrap
-  let free ptr = State.free ptr |> unwrap
+  let load ret ty = State.load (Summary.Value.as_ptr ret) ty |> unwrap
+  let store ret ty rv = State.store (Summary.Value.as_ptr ret) ty rv |> unwrap
+  let free ret = State.free (Summary.Value.as_ptr ret) |> unwrap
 
   let alloc ty rv =
     let* ptr = State.alloc_ty ty |> unwrap in
@@ -29,20 +29,20 @@ module Symok = struct
 
   let exec_drop drops ty ~none ~some =
     match ty with
-    | Types.TAdt { id = TAdtId id; _ } -> (
+    | Types.TAdt { id; _ } -> (
         match Types.TypeDeclId.Map.find_opt id drops with
         | Some fun_decl ->
-            let* ptr = some in
-            let* _ = exec_fun fun_decl ~args:[ Ptr ptr ] |> unwrap in
-            free ptr
+            let* ret = some in
+            let* _ = exec_fun fun_decl ~args:[ ret ] |> unwrap in
+            free ret
         | None -> none)
     | _ -> none
 end
 
 type t =
   Summary.t list ->
-  ( Types.ty * Summary.Ret.t,
-    Error.with_trace * Wpst_interp.StateM.st,
+  ( Types.ty * Summary.Value.t,
+    Error.with_trace * Interp.StateM.st,
     State.syn list )
   State.SM.Result.t
 
@@ -57,14 +57,14 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
   (* Check reference arguments and allocate values on heap *)
   let* args, arg_ptrs, subst =
     ListLabels.fold_left2 summs fun_decl.signature.inputs
-      ~init:(State.SM.return ([], [], Typed.Expr.Subst.empty))
+      ~init:(State.SM.return ([], [], Summary.Typed.Expr.Subst.empty))
       ~f:(fun acc summ ty ->
         let* args, arg_ptrs, subst = acc in
         let* arg, subst = Summary.run_producer subst summ in
         match ty with
         | Types.TRef (_, ty, _) ->
             let+ ptr = Symok.alloc ty arg in
-            (Rust_val.Ptr ptr :: args, (ty, ptr) :: arg_ptrs, subst)
+            (ptr :: args, (ty, ptr) :: arg_ptrs, subst)
         | _ -> State.SM.return (arg :: args, arg_ptrs, subst))
   in
   let args = List.rev args in
@@ -73,19 +73,14 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
   (* Handle the return value if it is a reference *)
   let+ () =
     match ty with
-    | TRef (_, ty, kind) -> (
-        (* The return value must be a pointer *)
-        let ptr = Rust_val.as_ptr ret in
-        match kind with
-        | RShared ->
-            (* For shared references, we simply read the return pointer *)
-            let+ _ = Symok.load ptr ty in
-            ()
-        | RMut ->
-            (* For mutable references, we write to the pointer with safe
-               values*)
-            let* ret, _ = Summary.run_producer subst (Option.get summ) in
-            Symok.store ptr ty ret)
+    | TRef (_, ty, RShared) ->
+        (* For shared references, we simply read from the pointer *)
+        let+ _ = Symok.load ret ty in
+        ()
+    | TRef (_, ty, RMut) ->
+        (* For mutable references, we write safe values to the pointer *)
+        let* rv, _ = Summary.run_producer subst (Option.get summ) in
+        Symok.store ret ty rv
     | _ -> State.SM.return ()
   in
   Compo_res.Ok (ty, ret, arg_ptrs)
@@ -102,14 +97,10 @@ let branch drops wrapper =
   let drop_ptr ty ptr () =
     Symok.exec_drop drops ty ~none:(Symok.free ptr) ~some:(State.SM.return ptr)
   in
-  let lift_nondet (ty : Charon.Types.ty) (ret : Summary.Ret.t) :
-      Summary.Ret.t State.SM.t =
-    let* nondet =
-      let module Encoder = Value_codec.Encoder (State.Sptr) in
-      Encoder.nondet_valid ty |> State.SM.lift |> Symok.unwrap
-    in
-    let+ () = State.SM.assume @@ [ Summary.Ret.sem_eq nondet ret ] in
-    nondet
+  let lift_nondet ty ret =
+    let* nondet = Summary.Value.nondet ty |> State.SM.lift in
+    let* () = State.SM.assume [ Summary.Value.sem_eq nondet ret ] in
+    State.SM.Result.ok (ty, nondet)
   in
   (* For each reference, we create an execution branch that returns the stored
      value and drops everything else, including the return value *)
@@ -118,8 +109,7 @@ let branch drops wrapper =
         (* Case 0: we learn from the return value, the rest has been dropped *)
         let branch () =
           let* () = drops in
-          let* nondet = lift_nondet ty ret in
-          State.SM.Result.ok (ty, nondet)
+          lift_nondet ty ret
         in
         branch :: acc
     | (ty, ptr) :: arg_ptrs ->
@@ -130,19 +120,16 @@ let branch drops wrapper =
           let* () = Symok.free ptr in
           let* () =
             ListLabels.fold_left arg_ptrs ~init:(drop_ret ())
-              ~f:(fun (st : unit State.SM.t) (ty, ptr) ->
-                State.SM.bind (drop_ptr ty ptr) st)
+              ~f:(fun st (ty, ptr) -> State.SM.bind (drop_ptr ty ptr) st)
           in
-          let* nondet = lift_nondet ty ret in
-          State.SM.Result.ok (ty, nondet)
+          lift_nondet ty ret
         in
         (* Case 2: we learn nothing from this reference, so we drop it *)
         let drops =
           let* () = drops in
           drop_ptr ty ptr ()
         in
-        (* We keep case 1 in the result and proceed with the state from case
-           2 *)
+        (* Keep case 1 in the result and proceed with the state from case 2 *)
         get_branches arg_ptrs ~acc:(branch :: acc) ~drops
   in
   get_branches arg_ptrs |> State.SM.branches

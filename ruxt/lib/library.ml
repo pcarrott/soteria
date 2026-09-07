@@ -11,18 +11,23 @@ type t = {
 
 let get () =
   let crate = Crate.get_crate () in
+  (* let f (x : UllbcAst.fun_decl) = x. *)
   let is_drop ({ src; _ } : UllbcAst.fun_decl) =
-    match src with TraitImplItem (_, _, "drop", _) -> true | _ -> false
+    match src with
+    | TraitImplFun (_, decl, _, _) ->
+        let decl = Crate.get_trait_decl decl in
+        decl.item_meta.lang_item = Some RustcLangItemDestruct
+    | _ -> false
   in
   let update_drops (fun_decl : UllbcAst.fun_decl)
-      (constructors, fun_decls, drops) =
+      ((constructors, fun_decls, drops) as lib) =
     match List.hd fun_decl.signature.inputs with
-    | TRef (_, TAdt { id = TAdtId id; _ }, _) ->
+    | TRef (_, TAdt { id }, _) ->
         (constructors, fun_decls, Types.TypeDeclId.Map.add id fun_decl drops)
-    | _ -> failwith "Library with invalid drop signature"
+    | _ -> lib
   in
   let can_infer ({ src; item_meta; signature; _ } : UllbcAst.fun_decl) =
-    src = TopLevelItem
+    src = NormalFun
     && item_meta.is_local
     && (not signature.is_unsafe)
     && (item_meta.attr_info.public || not (Config.get ()).only_public)

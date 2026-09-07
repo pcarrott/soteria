@@ -8,7 +8,7 @@ open Analyses.Util
 
 let exec_crate (crate : Crate.t) =
   let@ () = Crate.with_crate crate in
-  let@ () = Call_graph.with_dumped_callgraph () in
+  let@ () = Call_graph.with_dumped () in
   let config = Config.get () in
   (* Set fuel for summary inference *)
   let fuel =
@@ -22,6 +22,13 @@ let exec_crate (crate : Crate.t) =
     if passes <= 0 then Result.ok () (* Fuel exhausted, no unsoundness found *)
     else (* Pass over the library and update the summary context *)
       let* summ_ctx = Library.infer_summaries ~fuel summ_ctx library in
+      let size =
+        Summary.Context.M.fold
+          (fun _ (v, u, s) acc ->
+            acc + List.length v + List.length u + List.length s)
+          summ_ctx 0
+      in
+      Fmt.pr "Current number of summaries: %d@." size;
       find_unsoundness (passes - 1) summ_ctx
   in
   (* Collect statistics from all the runs *)
@@ -41,10 +48,16 @@ let with_exn_and_config config f =
     let outcome = f () in
     Analyses.Outcome.exit outcome
   with
-  | Frontend.PluginError e -> fatal ~name:"Plugin" e
   | Frontend.FrontendError e -> fatal ~name:"Frontend" ~code:3 e
-  | Frontend.CompilationError e ->
-      print_diagnostic_simple ~severity:Error ("Compilation error:\n" ^ e);
+  | Frontend.CompilationError (info, msg) ->
+      print_diagnostic_simple ~severity:Error "Compilation error";
+      Fmt.pr "@.%s@.%a@.@." msg Unimplemented.pp
+        (Unimplemented.make
+           ~tip:
+             ( "You can try cleaning plugins and rebuilding them",
+               Some "soteria-rust build-plugins [compilation flags]" )
+           ~issue:388
+           ("Compilation failed while " ^ info));
       Analyses.Outcome.exit Error
   | Exn.Config_error err ->
       fatal ~name:"Config" ~code:Cmdliner.Cmd.Exit.cli_error err
