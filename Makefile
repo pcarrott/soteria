@@ -134,8 +134,8 @@ packaging/soteria-rust/linux_dylibs.txt:
 
 .PHONY: switch
 switch:
-	$(OPAM) switch create --empty -y
-	$(OPAM) install ocaml-base-compile.$(OCAML_VERSION) dune.$(DUNE_VERSION) -y
+	$(OPAM) switch create . --empty -y
+	$(OPAM) install ocaml-base-compiler.$(OCAML_VERSION) dune.$(DUNE_VERSION) -y
 	$(OPAM) install . --deps-only --with-test --with-doc -y
 	$(OPAM) install ocaml-lsp-server odig ocamlformat.$(OCAMLFORMAT_VERSION) -y
 

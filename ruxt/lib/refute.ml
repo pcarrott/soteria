@@ -22,13 +22,13 @@ let exec_crate (crate : Crate.t) =
     if passes <= 0 then Result.ok () (* Fuel exhausted, no unsoundness found *)
     else (* Pass over the library and update the summary context *)
       let* summ_ctx = Library.infer_summaries ~fuel summ_ctx library in
-      let size =
+      (* let size =
         Summary.Context.M.fold
           (fun _ (v, u, s) acc ->
             acc + List.length v + List.length u + List.length s)
           summ_ctx 0
       in
-      Fmt.pr "Current number of summaries: %d@." size;
+      Fmt.pr "Current number of summaries: %d@." size; *)
       find_unsoundness (passes - 1) summ_ctx
   in
   (* Collect statistics from all the runs *)
