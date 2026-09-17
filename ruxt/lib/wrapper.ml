@@ -1,3 +1,4 @@
+open Soteria.Soteria_std
 open Soteria_rust_lib
 module State = Summary.State
 module Interp = Interp.Make (State)
@@ -39,12 +40,16 @@ module Symok = struct
     | _ -> none
 end
 
-type t =
+type fn =
   Summary.t list ->
   ( Types.ty * Summary.Value.t,
     Error.with_trace * Interp.StateM.st,
     State.syn list )
   State.SM.Result.t
+
+type t = { name : Types.name; fn : fn }
+
+let name { name; _ } = name
 
 let call (fun_decl : UllbcAst.fun_decl) summs =
   let ty = fun_decl.signature.output in
@@ -142,14 +147,14 @@ let make drops (fun_decl : UllbcAst.fun_decl) : t * Types.ty list =
     in
     match sign.output with TRef (_, ty, RMut) -> ty :: tys | _ -> tys
   in
-  let wrapper summs = call fun_decl summs |> branch drops in
-  (wrapper, tys)
+  let fn summs = call fun_decl summs |> branch drops in
+  ({ name = fun_decl.item_meta.name; fn }, tys)
 
 let exec ~fuel (wrapper : t) summs =
   (* Symbolically execute the wrapped function call *)
-  State.SM.Result.run_with_state ~state:State.empty (wrapper summs)
+  State.SM.Result.run_with_state ~state:State.empty (wrapper.fn summs)
   |> Rustsymex.run ~stats:Caller ~mode:UX ~fuel
-  |> Result.fold_list ~init:[] ~f:(fun summs -> function
+  |> Monad.ResultM.fold_list ~init:[] ~f:(fun summs -> function
     (* Successful termination: a new summary can been inferred *)
     | Compo_res.Ok ((ty, ret), state), pcs ->
         let open Result.Syntax in

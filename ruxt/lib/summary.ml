@@ -1,3 +1,4 @@
+open Soteria.Soteria_std
 open Soteria_rust_lib
 module Typed = Svalue.Typed
 
@@ -118,7 +119,7 @@ let make (ret : Value.t) (st : State.SM.st) (pcs : Typed.Expr.t list) :
       in
       if (Config.get ()).ignore_leaks then Result.ok reachable
       else
-        Result.fold_list unreachable ~init:reachable
+        Monad.ResultM.fold_list unreachable ~init:reachable
           ~f:(fun reachable -> function
           | State.Ser_heap
               ( _,

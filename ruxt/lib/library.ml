@@ -1,3 +1,5 @@
+open Soteria.Soteria_std
+open Syntaxes.FunctionWrap
 module Config_ = Config
 open Soteria_rust_lib
 module Config = Config_
@@ -54,10 +56,17 @@ let get () =
 let infer_summaries ~fuel summ_ctx wrappers =
   (* Infer summaries and prune summary context *)
   let+ summ_ctx =
-    Result.fold_list wrappers ~init:summ_ctx ~f:(fun summ_ctx (wrapper, tys) ->
+    Monad.ResultM.fold_list wrappers ~init:summ_ctx
+      ~f:(fun summ_ctx (wrapper, tys) ->
+        let@ () =
+          L.with_section
+            (Fmt.str "Inferring summary for %a" Crate.pp_name
+               (Wrapper.name wrapper))
+        in
         (* Iterate over snapshot of current summary context *)
         let snapshot = Summary.Context.iter_summs tys summ_ctx in
-        Result.fold_iter snapshot ~init:summ_ctx ~f:(fun summ_ctx inputs ->
+        Monad.ResultM.fold_iter snapshot ~init:summ_ctx
+          ~f:(fun summ_ctx inputs ->
             (* Stage update to summary context with inferred summaries *)
             let+ outputs = Wrapper.exec ~fuel wrapper inputs in
             ListLabels.fold_left outputs ~init:summ_ctx
