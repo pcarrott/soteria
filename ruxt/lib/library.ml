@@ -58,19 +58,25 @@ let infer_summaries ~fuel summ_ctx wrappers =
   let+ summ_ctx =
     Monad.ResultM.fold_list wrappers ~init:summ_ctx
       ~f:(fun summ_ctx (wrapper, tys) ->
-        let@ () =
-          L.with_section
-            (Fmt.str "Inferring summary for %a" Crate.pp_name
-               (Wrapper.name wrapper))
+        let+ summ_ctx =
+          let@ () =
+            L.with_section
+              (Fmt.str "Inferring summary for %a" Crate.pp_name
+                 (Wrapper.name wrapper))
+          in
+          (* Iterate over snapshot of current summary context *)
+          let snapshot = Summary.Context.iter_summs tys summ_ctx in
+
+          Monad.ResultM.fold_iter snapshot ~init:summ_ctx
+            ~f:(fun summ_ctx inputs ->
+              (* Stage update to summary context with inferred summaries *)
+              let+ outputs = Wrapper.exec ~fuel wrapper inputs in
+              ListLabels.fold_left outputs ~init:summ_ctx
+                ~f:(fun ctx (ty, summ) -> Summary.Context.stage ty summ ctx))
         in
-        (* Iterate over snapshot of current summary context *)
-        let snapshot = Summary.Context.iter_summs tys summ_ctx in
-        Monad.ResultM.fold_iter snapshot ~init:summ_ctx
-          ~f:(fun summ_ctx inputs ->
-            (* Stage update to summary context with inferred summaries *)
-            let+ outputs = Wrapper.exec ~fuel wrapper inputs in
-            ListLabels.fold_left outputs ~init:summ_ctx
-              ~f:(fun ctx (ty, summ) -> Summary.Context.stage ty summ ctx)))
+        L.with_section "Current summary context" (fun () ->
+            L.debug (fun m -> m "%a" Summary.Context.pp summ_ctx));
+        summ_ctx)
   in
   (* Commit update with new summaries *)
   Summary.Context.commit summ_ctx

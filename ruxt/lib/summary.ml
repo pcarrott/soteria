@@ -1,4 +1,5 @@
 open Soteria.Soteria_std
+open Syntaxes.FunctionWrap
 open Soteria_rust_lib
 module Typed = Svalue.Typed
 
@@ -184,7 +185,13 @@ let run_producer (subst : Typed.Expr.Subst.t) (summ : t) :
   let symex = Rustsymex.Producer.run ~subst @@ produce summ st in
   Rustsymex.map (fun ((ret, st), subst) -> ((ret, subst), st)) symex
 
-let implies s_pre s_post =
+let implies ?names s_pre s_post =
+  let section_name =
+    match names with
+    | Some (pre, post) -> Fmt.str "Checking %s implies %s" pre post
+    | None -> "Checking summary implication"
+  in
+  let@ () = L.with_section section_name in
   let process =
     let open Rustsymex.Syntax in
     (* Make sure we run the producer inside the symex *)
@@ -252,24 +259,40 @@ module Context = struct
   let stage ty summ (ctx : t) : t =
     let@ id = (ty, ctx) in
     let exception SummaryAlreadyExists in
-    let[@tail_mod_cons] rec filter = function
+    let[@tail_mod_cons] rec filter i = function
       | [] -> []
       | x :: l ->
-          if implies summ x then raise SummaryAlreadyExists
+          if implies ~names:("this summary", Fmt.str "summary %d" i) summ x then
+            raise SummaryAlreadyExists
             (* The new summary implies an existing summary: discard the new
                summary *)
-          else if implies x summ then filter l
+          else if implies ~names:(Fmt.str "summary %d" i, "this summary") x summ
+          then filter (i + 1) l
             (* An existing summary implies the new summary: discard the existing
                summary *)
-          else x :: filter l
+          else x :: filter (i + 1) l
     in
     let opt_cons = function
       | None -> Some ([], [], [ summ ])
       | Some (visited, unvisited, staged) as summs -> (
-          try Some (filter visited, filter unvisited, summ :: filter staged)
+          try
+            Some (filter 0 visited, filter 0 unvisited, summ :: filter 0 staged)
           with SummaryAlreadyExists -> summs)
     in
     M.update id opt_cons ctx
 
   let commit (ctx : t) : t = M.map (fun (v, u, s) -> (u @ v, s, [])) ctx
+
+  let pp_summs kind fmt = function
+    | [] -> Fmt.pf fmt "%s: none" kind
+    | summs ->
+        Fmt.pf fmt "@[<v 2>%s:@ %a@]" kind (Fmt.list ~sep:Fmt.cut pp) summs
+
+  let pp fmt (ctx : t) =
+    let pp_entry fmt (id, (visited, unvisited, staged)) =
+      Fmt.pf fmt "@[<v 2>%a:@ %a@ %a@ %a@]" Crate.pp_name
+        (Crate.get_adt_raw id).item_meta.name (pp_summs "visited") visited
+        (pp_summs "unvisited") unvisited (pp_summs "staged") staged
+    in
+    Fmt.pf fmt "@[<v>%a@]" (Fmt.list ~sep:Fmt.cut pp_entry) (M.bindings ctx)
 end
