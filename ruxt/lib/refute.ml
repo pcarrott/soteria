@@ -30,10 +30,11 @@ let exec_crate (crate : Crate.t) =
   (* Collect statistics from all the runs *)
   let res, stats =
     let@ () = Layout.Session.with_layout_cache in
-    Soteria.Stats.As_ctx.with_ () (fun () ->
-        (* Run the algorithm starting from the base summary context *)
-        let* summ_ctx = Library.init_summaries ~fuel library in
-        find_unsoundness config.pass_fuel summ_ctx)
+    let@ () = Soteria.Stats.As_ctx.with_ () in
+    let@ () = Soteria.Stats.As_ctx.add_time_of_to "ruxt.analysis_time" in
+    (* Run the algorithm starting from the base summary context *)
+    let* summ_ctx = Library.init_summaries ~fuel library in
+    find_unsoundness config.pass_fuel summ_ctx
   in
   Soteria.Stats.output stats;
   res
