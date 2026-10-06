@@ -4,8 +4,8 @@ on:
   workflow_call:
 
 env:
-  # [versionsync: OBOL_REPO=soteria-tools/obol]
-  OBOL_REPO: soteria-tools/obol
+  # [versionsync: OBOL_REPO=N1ark/obol]
+  OBOL_REPO: N1ark/obol
   # [versionsync: OBOL_COMMIT_HASH=514e0fa36ecba85da8e3a764f869634488f4782f]
   OBOL_COMMIT_HASH: 514e0fa36ecba85da8e3a764f869634488f4782f
 

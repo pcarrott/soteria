@@ -15,12 +15,12 @@ on:
 env:
   # [versionsync: OCAML_VERSION=5.5.0]
   OCAML_VERSION: 5.5.0
-  # [versionsync: OBOL_REPO=soteria-tools/obol]
-  OBOL_REPO: soteria-tools/obol
+  # [versionsync: OBOL_REPO=N1ark/obol]
+  OBOL_REPO: N1ark/obol
   # [versionsync: OBOL_COMMIT_HASH=514e0fa36ecba85da8e3a764f869634488f4782f]
   OBOL_COMMIT_HASH: 514e0fa36ecba85da8e3a764f869634488f4782f
-  # [versionsync: CHARON_REPO=soteria-tools/charon]
-  CHARON_REPO: soteria-tools/charon
+  # [versionsync: CHARON_REPO=AeneasVerif/charon]
+  CHARON_REPO: AeneasVerif/charon
   # [versionsync: CHARON_COMMIT_HASH=26cee99d259d3c106394e2e1ab53f3feaa11f3c9]
   CHARON_COMMIT_HASH: 26cee99d259d3c106394e2e1ab53f3feaa11f3c9
 
@@ -126,7 +126,10 @@ jobs:
         run: brew install make
         if: ${{ (!steps.restore-charon-cache.outputs.cache-hit || !steps.restore-obol-cache.outputs.cache-hit) && runner.os == 'macOS' }}
       - name: Install Obol if not cached
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
+          git config --global url."https://github.com/AeneasVerif/charon".insteadOf "https://github.com/soteria-tools/charon"
           $GITHUB_WORKSPACE/scripts/versionsync.py pull obol --init
           cp -r ../obol/bin obol-bin
         if: ${{ !steps.restore-obol-cache.outputs.cache-hit }}
