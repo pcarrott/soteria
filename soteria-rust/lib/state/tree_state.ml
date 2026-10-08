@@ -825,8 +825,10 @@ module Make (Borrows : Tree_borrows.T) = struct
     let** () =
       with_ptr Ghost ptr (fun _ ->
           Block.with_block_read_tb (fun tb ->
-              if Borrows.Tree.strong_protector_exists tb then
-                Tree_block.SM.Result.error `InvalidFreeStrongProtector
+              if
+                (not (Config.get ()).ignore_aliasing)
+                && Borrows.Tree.strong_protector_exists tb
+              then Tree_block.SM.Result.error `InvalidFreeStrongProtector
               else Tree_block.SM.Result.ok ()))
     in
     [%l.debug "Freeing pointer %a" Sptr.pp ptr];

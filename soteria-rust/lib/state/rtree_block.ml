@@ -614,6 +614,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
     fold_iter ~init:None
       ~f:(fun acc ((offset, len), _, tb_st) ->
         match (tb_st, acc) with
+        | None, _ when (Config.get ()).ignore_aliasing -> Result.ok acc
         | None, _ ->
             (* Missing state; we must miss *)
             lift_miss ~offset ~len

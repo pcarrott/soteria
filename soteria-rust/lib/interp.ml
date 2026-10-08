@@ -1325,6 +1325,12 @@ module Make (StateImpl : State.S) = struct
         let fn = Crate.get_fun fundef.id in
         exec_real_fun fn fundef.generics args
 
+  (** Used in RUXt that needs to hijack drop glues. *)
+  let exec_fn_ptr_compo ~args ~state (fn_ptr : Types.fn_ptr) =
+    let@ () = run ~env:Store.empty ~state in
+    let* fn = resolve_fn_ptr fn_ptr in
+    with_env ~env:() @@ exec_fun fn args
+
   let exec_fun ~args (fundef : UllbcAst.fun_decl) =
     (* HACK: we protect this function with a bind to make sure no effects are
        raised before the handlers are correctly setup. For a way of fixing this,

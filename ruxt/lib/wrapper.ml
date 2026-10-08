@@ -5,45 +5,69 @@ module Interp = Interp.Make (State)
 open State.SM.Syntax
 open Charon
 
-let exec_fun ~args fun_decl =
+(* Runs an interpreter computation from the current state, dropping the state
+   the interpreter pairs with its errors *)
+let lift_interp f =
   let* state = State.SM.get_state () in
   let** ret, state =
-    State.SM.lift @@ Interp.exec_fun_compo ~args ~state fun_decl
+    State.SM.lift @@ Rustsymex.map (Compo_res.map_error fst) @@ f ~state
   in
   let+ () = State.SM.set_state state in
   Compo_res.ok ret
 
-module Symok = struct
-  let unwrap res =
-    State.SM.map
-      (function Compo_res.Ok v -> v | _ -> failwith "Expected Ok in wrapper")
-      res
+let exec_fun ~args fun_decl = lift_interp (Interp.exec_fun_compo ~args fun_decl)
 
-  let load ret ty = State.load (Summary.Value.as_ptr ret) ty |> unwrap
-  let store ret ty rv = State.store (Summary.Value.as_ptr ret) ty rv |> unwrap
-  let free ret = State.free (Summary.Value.as_ptr ret) |> unwrap
+(* Executes [<ty as Destruct>::drop_glue(ptr)] like a drop desugared by Charon,
+   where [drop_glue] is the drop glue of the ADT [ty]: its impl is instantiated
+   with the generics of [ty], which carry the [Destruct] impls of the type
+   parameters. *)
+let exec_drop_glue (drop_glue : UllbcAst.fun_decl) (ty : Types.ty) ptr =
+  match (drop_glue.src, ty) with
+  | TraitImplFun (impl_ref, trait_decl_ref, method_id, _), TAdt { generics; _ }
+    ->
+      let trait_decl_ref =
+        {
+          trait_decl_ref with
+          generics = { trait_decl_ref.generics with types = [ ty ] };
+        }
+      in
+      let trait_ref : Types.trait_ref =
+        {
+          kind = TraitImpl { impl_ref with generics };
+          trait_decl_ref =
+            { binder_regions = []; binder_value = trait_decl_ref };
+        }
+      in
+      let fn_ptr : Types.fn_ptr =
+        {
+          kind = TraitMethod (trait_ref, method_id);
+          generics =
+            { TypesUtils.empty_generic_args with regions = [ RErased ] };
+        }
+      in
+      lift_interp (Interp.exec_fn_ptr_compo ~args:[ ptr ] fn_ptr)
+  | _ -> failwith "Expected the drop glue of an ADT"
 
-  let alloc ty rv =
-    let* ptr = State.alloc_ty ty |> unwrap in
-    let+ () = store ptr ty rv in
-    ptr
+let alloc ty v =
+  let** ptr = State.alloc_ty ty in
+  let++ () = State.store (Summary.Value.as_ptr ptr) ty v in
+  ptr
 
-  let exec_drop drops ty ~none ~some =
-    match ty with
-    | Types.TAdt { id; _ } -> (
-        match Types.TypeDeclId.Map.find_opt id drops with
-        | Some fun_decl ->
-            let* ret = some in
-            let* _ = exec_fun fun_decl ~args:[ ret ] |> unwrap in
-            free ret
-        | None -> none)
-    | _ -> none
-end
+let exec_drop drops ty ~none ~some =
+  match ty with
+  | Types.TAdt { id; _ } -> (
+      match Types.TypeDeclId.Map.find_opt id drops with
+      | Some fun_decl ->
+          let** ptr = some in
+          let** _ = exec_drop_glue fun_decl ty ptr in
+          State.free (Summary.Value.as_ptr ptr)
+      | None -> none)
+  | _ -> none
 
 type fn =
   Summary.t list ->
   ( Types.ty * Summary.Value.t,
-    Error.with_trace * Interp.StateM.st,
+    Error.with_trace,
     State.syn list )
   State.SM.Result.t
 
@@ -60,47 +84,48 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
   let summ = if_rmut ~then_:(fun _ -> Some (List.hd summs)) ~else_:None in
   let summs = if_rmut ~then_:(fun _ -> List.tl summs) ~else_:summs in
   (* Check reference arguments and allocate values on heap *)
-  let* args, arg_ptrs, subst =
+  let** args, arg_ptrs, subst =
     ListLabels.fold_left2 summs fun_decl.signature.inputs
-      ~init:(State.SM.return ([], [], Summary.Typed.Expr.Subst.empty))
+      ~init:(State.SM.Result.ok ([], [], Summary.Typed.Expr.Subst.empty))
       ~f:(fun acc summ ty ->
-        let* args, arg_ptrs, subst = acc in
+        let** args, arg_ptrs, subst = acc in
         let* arg, subst = Summary.run_producer subst summ in
         match ty with
         | Types.TRef (_, ty, _) ->
-            let+ ptr = Symok.alloc ty arg in
+            let++ ptr = alloc ty arg in
             (ptr :: args, (ty, ptr) :: arg_ptrs, subst)
-        | _ -> State.SM.return (arg :: args, arg_ptrs, subst))
+        | _ -> State.SM.Result.ok (arg :: args, arg_ptrs, subst))
   in
   let args = List.rev args in
   (* Symbolically execute the function call *)
   let** ret = exec_fun fun_decl ~args in
   (* Handle the return value if it is a reference *)
-  let+ () =
+  let++ () =
     match ty with
     | TRef (_, ty, RShared) ->
         (* For shared references, we simply read from the pointer *)
-        let+ _ = Symok.load ret ty in
+        let++ _ = State.load (Summary.Value.as_ptr ret) ty in
         ()
     | TRef (_, ty, RMut) ->
         (* For mutable references, we write safe values to the pointer *)
         let* rv, _ = Summary.run_producer subst (Option.get summ) in
-        Symok.store ret ty rv
-    | _ -> State.SM.return ()
+        State.store (Summary.Value.as_ptr ret) ty rv
+    | _ -> State.SM.Result.ok ()
   in
-  Compo_res.Ok (ty, ret, arg_ptrs)
+  (ty, ret, arg_ptrs)
 
 let branch drops wrapper =
   (* Obtain the result from the executing the function call *)
   let** ty, ret, arg_ptrs = wrapper in
   (* Drop the return value *)
   let drop_ret () =
-    Symok.exec_drop drops ty ~none:(State.SM.return ())
-      ~some:(Symok.alloc ty ret)
+    exec_drop drops ty ~none:(State.SM.Result.ok ()) ~some:(alloc ty ret)
   in
   (* Drop a reference argument *)
   let drop_ptr ty ptr () =
-    Symok.exec_drop drops ty ~none:(Symok.free ptr) ~some:(State.SM.return ptr)
+    exec_drop drops ty
+      ~none:(State.free (Summary.Value.as_ptr ptr))
+      ~some:(State.SM.Result.ok ptr)
   in
   let lift_nondet ty ret =
     let* nondet = Summary.Value.nondet ty |> State.SM.lift in
@@ -109,29 +134,31 @@ let branch drops wrapper =
   in
   (* For each reference, we create an execution branch that returns the stored
      value and drops everything else, including the return value *)
-  let rec get_branches ?(acc = []) ?(drops = State.SM.return ()) = function
+  let rec get_branches ?(acc = []) ?(drops = State.SM.Result.ok ()) = function
     | [] ->
         (* Case 0: we learn from the return value, the rest has been dropped *)
         let branch () =
-          let* () = drops in
+          let** () = drops in
           lift_nondet ty ret
         in
         branch :: acc
     | (ty, ptr) :: arg_ptrs ->
         (* Case 1: we learn from this reference and drop the rest *)
         let branch () =
-          let* () = drops in
-          let* ret = Symok.load ptr ty in
-          let* () = Symok.free ptr in
-          let* () =
+          let** () = drops in
+          let** ret = State.load (Summary.Value.as_ptr ptr) ty in
+          let** () = State.free (Summary.Value.as_ptr ptr) in
+          let** () =
             ListLabels.fold_left arg_ptrs ~init:(drop_ret ())
-              ~f:(fun st (ty, ptr) -> State.SM.bind (drop_ptr ty ptr) st)
+              ~f:(fun st (ty, ptr) ->
+                let** () = st in
+                drop_ptr ty ptr ())
           in
           lift_nondet ty ret
         in
         (* Case 2: we learn nothing from this reference, so we drop it *)
         let drops =
-          let* () = drops in
+          let** () = drops in
           drop_ptr ty ptr ()
         in
         (* Keep case 1 in the result and proceed with the state from case 2 *)
