@@ -39,7 +39,15 @@ impl LinkedList {
         }
     }
 
-    fn pop_front_node(&mut self) -> Option<Box<Node>> {
+    pub fn cycle(&mut self) {
+        // Create a cycle in the linked list. Not intrinsicly bad,
+        // but incompatible with how drop is implemented.
+        self.tail.map(|node| unsafe {
+            (*node.as_ptr()).next = self.head;
+        });
+    }
+
+    pub fn pop_front_node(&mut self) -> Option<Box<Node>> {
         self.head.map(|node| unsafe {
             let node = Box::from_raw(node.as_ptr());
             self.head = node.next;

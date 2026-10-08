@@ -664,19 +664,6 @@ module Make (Typed : Typed_intf.Solver_value) = struct
           let v2, st = get_or_make v2 st in
           merge v1 v2 st;
           ((Svalue.Bool.v_true, vars), st)
-      | Unop (Not, { node = { kind = Nop (Distinct, hd :: tl); _ }; _ }) ->
-          let vars = add_vars hd Var.Set.empty in
-          let v1, st = get_or_make hd st in
-          let rec aux vars st = function
-            | [] -> (vars, st)
-            | v2 :: rest ->
-                let vars = add_vars v2 vars in
-                let v2, st = get_or_make v2 st in
-                merge v1 v2 st;
-                aux vars st rest
-          in
-          let vars, st = aux vars st tl in
-          ((Svalue.Bool.v_true, vars), st)
       | _ -> ((v, Var.Set.empty), st)
 
     (** In equality analysis we can be certain of the value of a variable, so we
