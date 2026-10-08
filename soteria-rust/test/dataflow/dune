@@ -1,0 +1,4 @@
+(test
+ (name test_panic_analysis)
+ (deps panic_examples.rs)
+ (libraries soteria_rust_lib soteria charon fmt alcotest))
