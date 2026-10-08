@@ -6,4 +6,5 @@
 
 (cram
  (deps ../../bin/ruxt.exe)
+ (setup_scripts cleanup.sh)
  (applies_to :whole_subtree))
