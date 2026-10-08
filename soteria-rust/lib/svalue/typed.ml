@@ -144,18 +144,30 @@ let dummy_decl_ref =
     builtin = None;
   }
 
+(* ADTs are compared up to regions, which can differ between the instantiations
+   of a same type *)
+let erase_regions =
+  let visitor =
+    object
+      inherit [_] Types.map_ty
+      method! visit_region _ _ = RErased
+    end
+  in
+  visitor#visit_type_decl_ref ()
+
 let cast_enum ?adt v =
   match (get_ty v, adt) with
   | TExtension (TEnum _), None -> v
-  | TExtension (TEnum adt'), Some adt when Types.equal_type_decl_ref adt adt' ->
+  | TExtension (TEnum adt'), Some adt
+    when Types.equal_type_decl_ref (erase_regions adt) (erase_regions adt') ->
       v
   | _ -> cast_error v (t_enum (Option.value adt ~default:dummy_decl_ref))
 
 let cast_union ?adt v =
   match (get_ty v, adt) with
   | TExtension (TUnion _), None -> v
-  | TExtension (TUnion adt'), Some adt when Types.equal_type_decl_ref adt adt'
-    ->
+  | TExtension (TUnion adt'), Some adt
+    when Types.equal_type_decl_ref (erase_regions adt) (erase_regions adt') ->
       v
   | _ -> cast_error v (t_union (Option.value adt ~default:dummy_decl_ref))
 
