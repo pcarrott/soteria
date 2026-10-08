@@ -38,10 +38,15 @@ distributed binaries.
       std::thread_local documentation
     * soteria-rust/test/cram/treeborrow.t/two-mut-protected.rs — from
       rust-lang/miri (tests/pass/tree_borrows/tree-borrows.rs)
+    * ruxt/test/cram/linked_list_mono.t/linked_list.rs — from Rust's
+      standard library (library/alloc/src/collections/linked_list.rs)
   Copyright The Rust Project Developers (see https://thanks.rust-lang.org)
   License: MIT OR Apache-2.0
   Upstream: https://github.com/rust-lang/rust,
             https://github.com/rust-lang/miri
+  ruxt/test/cram/linked_list_mono.t/linked_list.rs has been modified: it is
+  monomorphised, allocator-specific items are removed, and a buggy method is
+  added.
 
 - Linked-list example (soteria-rust/test/cram/poly.t/linked_list.rs)
   Copyright Aria Desires

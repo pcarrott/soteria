@@ -113,6 +113,12 @@ SPDX-FileCopyrightText = "The Rust Project Developers (see https://thanks.rust-l
 SPDX-License-Identifier = "MIT OR Apache-2.0"
 
 [[annotations]]
+path = "ruxt/test/cram/linked_list_mono.t/linked_list.rs"
+precedence = "override"
+SPDX-FileCopyrightText = "The Rust Project Developers (see https://thanks.rust-lang.org)"
+SPDX-License-Identifier = "MIT OR Apache-2.0"
+
+[[annotations]]
 path = "scripts/bench-index.html"
 precedence = "override"
 SPDX-FileCopyrightText = ["2019 rhysd", "2026 Soteria Tools Ltd."]
