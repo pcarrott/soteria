@@ -264,7 +264,7 @@ module Context = struct
       | [] ->
           let acc = if visited then acc else curr :: acc in
           let rec aux' ?(acc = []) = function
-            | [] -> f acc
+            | [] -> f (List.rev acc)
             | summs :: rest ->
                 List.iter (fun s -> aux' ~acc:(s :: acc) rest) summs
           in
@@ -280,7 +280,7 @@ module Context = struct
           aux values ~visited:true ~curr:(visited :: curr) ~acc:(summs :: acc)
     in
     try aux (List.rev_map (fun ty -> find ty ctx) tys)
-    with TypeNotSupported -> f []
+    with TypeNotSupported -> ()
 
   let stage ty summ (ctx : t) : t =
     let@ id = (ty, ctx) in
