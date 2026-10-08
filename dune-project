@@ -80,6 +80,7 @@
    (>= 0.5))
   (yojson
    (< 3.0))
+  xml-light
   (unionFind
    (>= 20220109))
   ppx_deriving_yojson

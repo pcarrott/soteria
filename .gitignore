@@ -32,6 +32,8 @@ lib-cov
 
 # Coverage directory used by tools like istanbul
 coverage
+!soteria/lib/coverage/
+!soteria/tests/coverage/
 *.lcov
 
 # nyc test coverage

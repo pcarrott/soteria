@@ -1,0 +1,9 @@
+(executables
+ (names print_coverage)
+ (libraries soteria)
+ (preprocess
+  (pps soteria.ppx)))
+
+(cram
+ (deps ./print_coverage.exe)
+ (enabled_if %{bin-available:z3}))

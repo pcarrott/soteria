@@ -43,6 +43,7 @@ depends: [
   "ppx_matches" {>= "0.2.0"}
   "hc" {>= "0.5"}
   "yojson" {< "3.0"}
+  "xml-light"
   "unionFind" {>= "20220109"}
   "ppx_deriving_yojson"
   "ocamlformat" {(with-test | with-dev-setup) & = "0.29.0"}

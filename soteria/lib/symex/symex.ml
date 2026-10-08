@@ -336,6 +336,9 @@ module type S = sig
       execution:
       - [fuel] receives a {{!Fuel_gauge.t}fuel gauge} to limit execution depth
         and breadth. By default, the fuel is infinite.
+      - [coverage] specifies whether coverage information about the execution is
+        already handled outside the function (see {!Coverage.As_ctx.with_}) or
+        should be handled and ignored by this function (default).
       - [stats] specifies whether statistics about the execution are already
         handled outside the function (see {!Stats.As_ctx.with_}) or should be
         handled and ignored by this function (default).
@@ -350,6 +353,7 @@ module type S = sig
         if the symbolic process calls [give_up] and the mode is
         {!Symex.Approx.OX}. Prefer using {!Result.run} when possible. *)
   val run :
+    ?coverage:unit Effects.Bookkeeping.mode ->
     ?flamegraph:string Effects.Bookkeeping.mode ->
     ?stats:unit Effects.Bookkeeping.mode ->
     ?fuel:Fuel_gauge.t ->
@@ -365,6 +369,7 @@ module type S = sig
         to an {{!Symex.Or_gave_up.t}[Or_gave_up.t]}, potentially adding any path
         that gave up to the list. *)
     val run :
+      ?coverage:unit Effects.Bookkeeping.mode ->
       ?flamegraph:string Effects.Bookkeeping.mode ->
       ?stats:unit Effects.Bookkeeping.mode ->
       ?fuel:Fuel_gauge.t ->
@@ -1017,9 +1022,11 @@ module Make (Sol : Solver.Mutable_incremental) :
   include CORE
   include Base_extension (CORE)
 
-  let setup ?(flamegraph = Effects.Bookkeeping.Ignore)
+  let setup ?(coverage = Effects.Bookkeeping.Ignore)
+      ?(flamegraph = Effects.Bookkeeping.Ignore)
       ?(stats = Effects.Bookkeeping.Ignore) ?(fuel = Fuel_gauge.infinite) ~mode
       f =
+    let@ () = Effects.Bookkeeping.manage (module Coverage.As_ctx) coverage in
     let@ () = Effects.Bookkeeping.manage (module Flamegraph) flamegraph in
     let@ () = Effects.Bookkeeping.manage (module Stats.As_ctx) stats in
     let () = Stats.As_ctx.incr StatKeys.branches in
@@ -1036,15 +1043,15 @@ module Make (Sol : Solver.Mutable_incremental) :
     let admissible () = Solver_result.admissible ~mode (Solver.sat ()) in
     iter @@ fun x -> if admissible () then continue (x, Solver.as_exprs ())
 
-  let run ?flamegraph ?stats ?fuel ~mode iter =
-    let@ () = setup ?flamegraph ?stats ?fuel ~mode in
+  let run ?coverage ?flamegraph ?stats ?fuel ~mode iter =
+    let@ () = setup ?coverage ?flamegraph ?stats ?fuel ~mode in
     Iter.to_list @@ run_iter ~mode iter
 
   module Result = struct
     include Result
 
-    let run ?flamegraph ?stats ?fuel ?(fail_fast = false) ~mode iter =
-      let@ () = setup ?flamegraph ?stats ?fuel ~mode in
+    let run ?coverage ?flamegraph ?stats ?fuel ?(fail_fast = false) ~mode iter =
+      let@ () = setup ?coverage ?flamegraph ?stats ?fuel ~mode in
       let l = ref [] in
       let () =
         let exception Fail_fast in

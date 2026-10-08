@@ -11,6 +11,14 @@ request.
 
 ## [Unreleased]
 
+### Added
+
+- Soteria: a `Coverage` module to track line, branch and function coverage during symbolic execution, enabled via the new `?coverage` argument of `Symex.run` and `Symex.Result.run`. Branch coverage can be recorded with the `[@span]`/`[@span_opt]` attributes on `if%sat`. Reports are written with `--output-coverage`, in JSON, Cobertura XML or LCOV format (`--coverage-format`).
+
+### Changed
+
+- Soteria now depends on `xml-light`, used for Cobertura XML coverage reports.
+
 ## [0.2.3] - 2026-08-07
 
 ### Changed

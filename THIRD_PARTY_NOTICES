@@ -106,6 +106,8 @@ linking into an executable distributed under terms of our choice.
   LGPL-2.1-only WITH OCaml-LGPL-linking-exception
 - unionFind 20260226 — François Pottier, INRIA —
   LGPL-2.0-only WITH OCaml-LGPL-linking-exception
+- xml-light 2.5 — Copyright (C) 2003 Nicolas Cannasse —
+  LGPL-2.1-or-later WITH OCaml-LGPL-linking-exception
 - zarith 1.14 — Copyright (c) 2010-2011 Antoine Miné, Abstraction project;
   Xavier Leroy, Pascal Cuoq; INRIA —
   LGPL-2.0-only WITH OCaml-LGPL-linking-exception

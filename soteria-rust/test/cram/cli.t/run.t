@@ -70,6 +70,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -81,6 +85,12 @@
              mode. When used with [compile], this is the only thing printed to
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
+  
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
   
          --output-crate
              Pretty-print the compiled crate to a file
@@ -303,6 +313,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -311,6 +324,9 @@
   
          SOTERIA_OFFLINE
              See option --offline.
+  
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
   
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
@@ -372,6 +388,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -383,6 +403,12 @@
              mode. When used with [compile], this is the only thing printed to
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
+  
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
   
          --output-crate
              Pretty-print the compiled crate to a file
@@ -602,6 +628,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -610,6 +639,9 @@
   
          SOTERIA_OFFLINE
              See option --offline.
+  
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
   
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
@@ -670,6 +702,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -681,6 +717,12 @@
              mode. When used with [compile], this is the only thing printed to
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
+  
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
   
          --output-crate
              Pretty-print the compiled crate to a file
@@ -904,6 +946,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -912,6 +957,9 @@
   
          SOTERIA_OFFLINE
              See option --offline.
+  
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
   
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
