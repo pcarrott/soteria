@@ -27,8 +27,27 @@ let get () =
         (constructors, fun_decls, Types.TypeDeclId.Map.add id fun_decl drops)
     | _ -> lib
   in
-  let can_infer ({ src; item_meta; signature; _ } : UllbcAst.fun_decl) =
-    src = NormalFun
+  (* Trait methods can be called by safe code, except for [Drop::drop]; closures
+     are not part of the API *)
+  let is_callable : UllbcAst.fun_source -> bool = function
+    | NormalFun -> true
+    | TraitImplFun (impl_ref, decl, _, _) -> (
+        (Crate.get_trait_decl decl).item_meta.lang_item
+        <> Some RustcLangItemDrop
+        &&
+        match (Crate.get_trait_impl_raw impl_ref.id).src with
+        | ClosureTraitImpl _ -> false
+        | _ -> true)
+    | _ -> false
+  in
+  (* Polymorphic functions are not supported yet *)
+  let is_monomorphic (generics : Types.generic_params) =
+    List.is_empty generics.types && List.is_empty generics.const_generics
+  in
+  let can_infer ({ src; item_meta; signature; generics; _ } : UllbcAst.fun_decl)
+      =
+    is_callable src
+    && is_monomorphic generics
     && item_meta.is_local
     && (not signature.is_unsafe)
     && (item_meta.attr_info.public || not (Config.get ()).only_public)
