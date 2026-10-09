@@ -139,13 +139,14 @@ let float_precision :
   | F128 -> F128
 
 let rec ty_of_rust : Types.ty -> 'g svty = function
-  | TLiteral (TFloat ft) -> TFloat (float_precision ft)
-  | TLiteral lit -> TBitVector (8 * size_of_literal_ty lit)
+  | TScalar (TFloat ft) -> TFloat (float_precision ft)
+  | TScalar lit -> TBitVector (8 * size_of_literal_ty lit)
   | TRef _ | TRawPtr _ | TFnPtr _ -> TExtension TFullPtr
   | TNever | TFnDef _ -> TExtension (TTuple [])
   | TVar _ -> TExtension TPolyType
   | TPattern (ty, _) -> ty_of_rust ty
-  | TArray (ty, n) -> TExtension (TArray (ty_of_rust ty, z_of_constant_expr n))
+  | TArray (ty, n, _) ->
+      TExtension (TArray (ty_of_rust ty, z_of_constant_expr n))
   | TAdt adt -> (
       assert (tyref_is_substituted adt);
       match (Crate.get_adt adt).kind with

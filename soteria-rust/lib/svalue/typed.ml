@@ -87,8 +87,8 @@ let t_ptr_t () : _ ty = TExtension TThinPtr
 let t_loc () = t_loc (8 * size_of_uint_ty Usize)
 let t_usize () = t_int (8 * size_of_uint_ty Usize)
 
-let t_lit : Types.literal_type -> [> T.sint ] ty = function
-  | (TInt _ | TUInt _ | TBool | TChar) as ty -> t_int (size_of_literal_ty ty * 8)
+let t_lit : Types.scalar_type -> [> T.sint ] ty = function
+  | (TInteger _ | TBool | TChar) as ty -> t_int (size_of_literal_ty ty * 8)
   | TFloat _ -> failwith "t_lit: unexpected float literal type"
 
 let t_float (ty : Types.float_type) : [< T.sfloat ] ty =
@@ -115,7 +115,7 @@ let cast_lit ty (v : 'a t) : [> T.sint ] t =
   let size = 8 * size_of_literal_ty ty in
   cast_checked ~ty:(t_int size) v
 
-let cast_i uty = cast_lit (TUInt uty)
+let cast_i uty = cast_lit (TInteger (Unsigned uty))
 let cast_f fty v = cast_checked ~ty:(t_float fty) v
 
 let cast_float v =
@@ -170,53 +170,48 @@ module BitVec = struct
   let mk_lit_nz ty = BitVec.mk_nz (size_of_literal_ty ty * 8)
   let mki_lit ty = BitVec.mki_masked (size_of_literal_ty ty * 8)
   let mki_lit_nz ty = BitVec.mki_nz (size_of_literal_ty ty * 8)
-  let u8 = mk_lit (TUInt U8)
-  let u8i = mki_lit (TUInt U8)
-  let u8nz = mk_lit_nz (TUInt U8)
-  let u8inz = mki_lit_nz (TUInt U8)
-  let u16 = mk_lit (TUInt U16)
-  let u32 = mk_lit (TUInt U32)
-  let u32i = mki_lit (TUInt U32)
-  let u32nz = mk_lit_nz (TUInt U32)
-  let u32inz = mki_lit_nz (TUInt U32)
-  let u64 = mk_lit (TUInt U64)
-  let u64i = mki_lit (TUInt U64)
-  let u128 = mk_lit (TUInt U128)
-  let u128i = mki_lit (TUInt U128)
-  let usize z = mk_lit (TUInt Usize) z
-  let usizei z = mki_lit (TUInt Usize) z
-  let usizenz z = mk_lit_nz (TUInt Usize) z
-  let usizeinz z = mki_lit_nz (TUInt Usize) z
+  let u8 = mk_lit (TInteger (Unsigned U8))
+  let u8i = mki_lit (TInteger (Unsigned U8))
+  let u8nz = mk_lit_nz (TInteger (Unsigned U8))
+  let u8inz = mki_lit_nz (TInteger (Unsigned U8))
+  let u16 = mk_lit (TInteger (Unsigned U16))
+  let u32 = mk_lit (TInteger (Unsigned U32))
+  let u32i = mki_lit (TInteger (Unsigned U32))
+  let u32nz = mk_lit_nz (TInteger (Unsigned U32))
+  let u32inz = mki_lit_nz (TInteger (Unsigned U32))
+  let u64 = mk_lit (TInteger (Unsigned U64))
+  let u64i = mki_lit (TInteger (Unsigned U64))
+  let u128 = mk_lit (TInteger (Unsigned U128))
+  let u128i = mki_lit (TInteger (Unsigned U128))
+  let usize z = mk_lit (TInteger (Unsigned Usize)) z
+  let usizei z = mki_lit (TInteger (Unsigned Usize)) z
+  let usizenz z = mk_lit_nz (TInteger (Unsigned Usize)) z
+  let usizeinz z = mki_lit_nz (TInteger (Unsigned Usize)) z
 
   let of_bool : T.sbool t -> [> T.sint ] t =
     of_bool (size_of_literal_ty TBool * 8)
 
-  let of_scalar : Values.scalar_value -> [> T.sint ] t = function
-    | UnsignedScalar (Usize, v) | SignedScalar (Isize, v) -> usize v
-    | UnsignedScalar (U8, v) | SignedScalar (I8, v) -> u8 v
-    | UnsignedScalar (U16, v) | SignedScalar (I16, v) -> u16 v
-    | UnsignedScalar (U32, v) | SignedScalar (I32, v) -> u32 v
-    | UnsignedScalar (U64, v) | SignedScalar (I64, v) -> u64 v
-    | UnsignedScalar (U128, v) | SignedScalar (I128, v) -> u128 v
-
-  let of_literal : Values.literal -> [> T.sint ] t = function
-    | VScalar s -> of_scalar s
-    | VChar c -> u32i (Uchar.to_int c)
-    | VBool b -> of_bool (Bool.of_bool b)
-    | l ->
-        Fmt.failwith "Cannot convert non-scalar literal %s to bitvector"
-          (Print.literal_to_string l)
-
-  let of_constant_expr : Types.constant_expr -> [> T.sint ] t = function
-    | { kind = CLiteral lit; _ } -> of_literal lit
-    | c ->
-        Fmt.failwith "Cannot convert non-value const expr %a to bitvector"
-          Types.pp_constant_expr c
+  let of_scalar : Values.integer_value -> [> T.sint ] t = function
+    | UnsignedInteger (Usize, v) | SignedInteger (Isize, v) -> usize v
+    | UnsignedInteger (U8, v) | SignedInteger (I8, v) -> u8 v
+    | UnsignedInteger (U16, v) | SignedInteger (I16, v) -> u16 v
+    | UnsignedInteger (U32, v) | SignedInteger (I32, v) -> u32 v
+    | UnsignedInteger (U64, v) | SignedInteger (I64, v) -> u64 v
+    | UnsignedInteger (U128, v) | SignedInteger (I128, v) -> u128 v
 
   let of_constant_expr_opt : Types.constant_expr -> [> T.sint ] t option =
     function
-    | { kind = CLiteral lit; _ } -> Some (of_literal lit)
+    | { kind = CInteger s; _ } -> Some (of_scalar s)
+    | { kind = CChar c; _ } -> Some (u32i (Uchar.to_int c))
+    | { kind = CBool b; _ } -> Some (of_bool (Bool.of_bool b))
     | _ -> None
+
+  let of_constant_expr (c : Types.constant_expr) : [> T.sint ] t =
+    match of_constant_expr_opt c with
+    | Some v -> v
+    | None ->
+        Fmt.failwith "Cannot convert non-value const expr %a to bitvector"
+          Types.pp_constant_expr c
 
   let max ~signed l r = ite (gt ~signed l r) l r
   let min ~signed l r = ite (lt ~signed l r) l r
@@ -436,9 +431,9 @@ module Adt = struct
     let variants = Crate.as_enum (t_as_enum v.node.ty) in
     let rec aux : Types.variant list -> _ t = function
       | [] -> L.failwith "discriminant_of: empty enum"
-      | [ var ] -> BV.of_literal var.discriminant
+      | [ var ] -> BV.of_scalar var.discriminant
       | var :: rest ->
-          ite (is_variant var.id v) (BV.of_literal var.discriminant) (aux rest)
+          ite (is_variant var.id v) (BV.of_scalar var.discriminant) (aux rest)
     in
     aux variants
 

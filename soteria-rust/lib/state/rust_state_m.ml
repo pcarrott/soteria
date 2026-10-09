@@ -180,8 +180,8 @@ module type S = sig
       (Typed.block Iter.t, 'env) monad
 
     val cast_literal :
-      from_ty:Values.literal_type ->
-      to_ty:Values.literal_type ->
+      from_ty:Values.scalar_type ->
+      to_ty:Values.scalar_type ->
       [< sint | sfloat ] v ->
       [> sint | sfloat ] v
 

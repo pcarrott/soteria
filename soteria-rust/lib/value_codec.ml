@@ -26,7 +26,7 @@ let variant_for_discriminant (discr : Typed.(T.sint t)) adt =
   let open Syntax in
   let variants = Crate.as_enum adt in
   let* variant =
-    match_on variants ~constr:(fun v -> BV.of_literal v.discriminant ==@ discr)
+    match_on variants ~constr:(fun v -> BV.of_scalar v.discriminant ==@ discr)
   in
   of_opt_not_impl "no matching variant for enum discriminant" variant
 
@@ -34,8 +34,8 @@ let variant_for_discriminant (discr : Typed.(T.sint t)) adt =
     a singleton iterator for that value. *)
 let iter_fields ?variant ?ptr layout (ty : Types.ty) =
   let rec to_fields ?variant fields : Types.ty -> Types.ty Iter.t = function
-    | TArray (ty, len) -> Iter.repeatz (z_of_constant_expr len) ty
-    | TSlice sub_ty -> (
+    | TArray (ty, len, _) -> Iter.repeatz (z_of_constant_expr len) ty
+    | TSlice (sub_ty, _) -> (
         let ptr = Option.get ~msg:"ptr required for slice" ptr in
         let len = Typed.Ptr.len_meta ptr in
         (* TODO: strings and slices of symbolic length *)
@@ -57,10 +57,11 @@ let iter_fields ?variant ?ptr layout (ty : Types.ty) =
     | TRef (_, pointee, _) | TRawPtr (pointee, _) -> (
         match Layout.dst_kind pointee with
         | NoneKind -> L.failwith "invalid iter_fields: no metadata"
-        | LenKind -> Iter.of_list [ unit_ptr; TLiteral (TInt Isize) ]
+        | LenKind ->
+            Iter.of_list [ unit_ptr; TScalar (TInteger (Signed Isize)) ]
         | VTableKind -> Iter.of_list [ unit_ptr; unit_ptr ])
     | TPattern (inner, _) -> to_fields ?variant fields inner
-    | TLiteral _ | TNever | TVar _ | TTraitType _ | TDynTrait _ | TFnPtr _
+    | TScalar _ | TNever | TVar _ | TTraitType _ | TDynTrait _ | TFnPtr _
     | TFnDef _ | TPtrMetadata _ | TError _ ->
         L.failwith "invalid iter_fields: %a" pp_ty ty
   in
@@ -191,9 +192,8 @@ struct
     let enum_single_variant ty =
       lift_rsymex_res @@ Layout.enum_single_variant ty
 
-    let assert_or_error cond err =
-     fun _handler _get_all _whole state ->
-      DecayMap.SM.Result.map (fun () -> ((), state)) (assert_or_error cond err)
+    let assert_or_error cond err : unit t =
+      lift_rsymex_res @@ Rustsymex.assert_or_error cond err
 
     let fold_iter x ~init ~f =
       Monad.foldM (module Iter) ~bind ~return:ok x ~init ~f
@@ -240,18 +240,18 @@ struct
       function
       | Known v ->
           let variant = Types.VariantId.nth variants v in
-          ok (BV.of_literal variant.discriminant)
+          ok (BV.of_scalar variant.discriminant)
       | Branch { offset = tag_ofs; tag_ty; children; fallback } ->
           (* You know what's cheaper than Pointer->Integer cast?
              Integer->Pointer cast. If the tag is pointer-sized, we read it as a
              pointer anyway, and special case null-checking. Allows for
              optimising away decays happening for e.g. Option<NonNull<T>>. *)
           let* tag =
-            if [%matches? TInt Isize | TUInt Usize] tag_ty then
+            if [%matches? TInteger (Signed Isize | Unsigned Usize)] tag_ty then
               let+ v = query unit_ptr (offset +!!@ tag_ofs) in
               `Ptr (Typed.Ptr.ptr_of (Typed.cast_ptr_f v))
             else
-              let+ v = query (TLiteral tag_ty) (offset +!!@ tag_ofs) in
+              let+ v = query (TScalar tag_ty) (offset +!!@ tag_ofs) in
               `Int (Typed.cast_lit tag_ty v)
           in
           let pp_tag ft = function
@@ -260,7 +260,7 @@ struct
           in
           let pp_info ft () =
             Fmt.pf ft ", read %a: %s at offset %a" pp_tag tag
-              (Print.literal_type_to_string tag_ty)
+              (Print.scalar_type_to_string tag_ty)
               Typed.ppa offset
           in
           let cond_for from_ to_ =
@@ -296,7 +296,7 @@ struct
       (* Don't query the memory if we know the variant *)
       let+? variant = enum_single_variant ty in
       let variant = Types.VariantId.nth variants variant in
-      Typed.BV.of_literal variant.discriminant
+      Typed.BV.of_scalar variant.discriminant
     in
     let/? () =
       (* Try querying the enum as a whole, to avoid branching of the enum's
@@ -326,18 +326,16 @@ struct
     in
     let* ty = normalise ty in
     let* layout = layout_of ty in
+    let* () =
+      assert_or_error (Typed.not layout.uninhabited) (`RefToUninhabited ty)
+    in
     (* If the state stores a whole value of this exact type at this offset, we
      * can read it as-is and avoid decoding it component by component. We can
      * only do this if:
      * - It is not a primitive value
-     * - It is inhabited
      * - It is not a DST (since it's decoding depends on the metadata)
      * - It is not a ZST *)
-    let can_read_whole =
-      Layout.is_aggregate layout
-      && (not layout.uninhabited)
-      && not (Layout.is_dst ty)
-    in
+    let can_read_whole = Layout.is_aggregate layout && not (Layout.is_dst ty) in
     let can_read_whole =
       Typed.of_bool can_read_whole &&@ Typed.not (layout.size ==@ Usize.(0s))
     in
@@ -346,7 +344,6 @@ struct
     in
     let- () = whole in
     match (layout.fields, ty) with
-    | _ when layout.uninhabited -> error (`RefToUninhabited ty)
     | _, TDynTrait _ -> L.failwith "decode: cannot decode an unsized dyn value"
     | _, TAdt adt when Crate.is_union adt ->
         if%sat layout.size ==@ Usize.(0s) then ok (Typed.Adt.mk_union adt [])
@@ -531,15 +528,15 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
   let ref_box_validity (fptr : Typed.([< T.sptr_f ] t)) pointee =
     let** () = metadata_validity ~is_raw_ptr:false pointee fptr in
     let** layout = Layout.layout_of pointee in
-    if layout.uninhabited then f Typed.v_false (`RefToUninhabited pointee)
-    else check_ref fptr pointee
+    let** () = f (Typed.not layout.uninhabited) (`RefToUninhabited pointee) in
+    check_ref fptr pointee
   in
   (* validity of pattern types (not stabilized) *)
   let rec pattern_valid_cond (inner_ty : Types.ty) (v : Typed.([< T.any ] t))
       (pat : Types.type_pattern) =
     match pat with
     | Range (start_expr, stop_expr) ->
-        let ty = TypesUtils.ty_as_literal inner_ty in
+        let ty = TypesUtils.ty_as_scalar inner_ty in
         let v = Typed.cast_lit ty v in
         let signed = is_signed ty in
         let lo = BV.of_constant_expr start_expr in
@@ -556,7 +553,7 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
   let* ty = Layout.normalise ty in
   match (ty : Types.ty) with
   (* undefined.validity.bool *)
-  | TLiteral TBool ->
+  | TScalar TBool ->
       let v = Typed.cast_i U8 v in
       f U8.(0s <=@ v &&@ (v <=@ 1s)) (`UBTransmute "Invalid bool value")
   (* undefined.validity.fn-pointer *)
@@ -564,7 +561,7 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
       let ptr = Typed.Ptr.ptr_of @@ Typed.cast_ptr_f v in
       f (Typed.not (Typed.Ptr.is_null ptr)) `UBDanglingPointer
   (* undefined.validity.char *)
-  | TLiteral TChar ->
+  | TScalar TChar ->
       let v = Typed.cast_lit TChar v in
       let is_surrogate = U32.(0xD800s <=@ v &&@ (v <=@ 0xDFFFs)) in
       let is_valid = U32.(v <=@ 0x10FFFFs) &&@ Typed.not is_surrogate in
@@ -572,15 +569,15 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
   (* undefined.validity.never *)
   | TNever -> f Typed.v_false (`RefToUninhabited ty)
   (* undefined.validity.scalar *)
-  | TLiteral (TInt _ | TUInt _) -> ok ()
-  | TLiteral (TFloat _) -> ok ()
+  | TScalar (TInteger _) -> ok ()
+  | TScalar (TFloat _) -> ok ()
   (* undefined.validity.reference-box *)
   | TRef (_, pointee, _) ->
       let ptr = Typed.cast_ptr_f v in
       ref_box_validity ptr pointee
   (* NOTE: this check must go before the struct check, since boxes are
      structs *)
-  | TAdt adt when adt_is_box adt ->
+  | TAdt { builtin = Some TBox; _ } ->
       let pointee = get_pointee ty in
       let ptr = ptr_of_box v in
       ref_box_validity ptr pointee
@@ -612,7 +609,7 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
       Iter.of_list (Crate.as_struct_tys adt)
       |> Iter.mapi (fun i ty -> (ty, Typed.Adt.field_of i v))
       |> iter_iter ~f:(fun (ty, v) -> validity ~check_ref ty v f)
-  | TArray (ty, _) | TSlice ty ->
+  | TArray (ty, _, _) | TSlice (ty, _) ->
       Typed.Adt.as_array (Typed.cast_array v)
       |> iter (module Iarray) ~f:(fun v -> validity ~check_ref ty v f)
   (* undefined.validity.union *)
@@ -653,24 +650,24 @@ let check_validity ~check_ref ty value st =
     See also:
     https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
 *)
-let cast_literal ~(from_ty : Types.literal_type) ~(to_ty : Types.literal_type)
+let cast_literal ~(from_ty : Types.scalar_type) ~(to_ty : Types.scalar_type)
     (v : Typed.([< T.sint | T.sfloat ] t)) =
   match (from_ty, to_ty) with
-  | _, _ when Types.equal_literal_type from_ty to_ty ->
+  | _, _ when Types.equal_scalar_type from_ty to_ty ->
       Typed.((v : [< T.sint | T.sfloat ] t :> [> T.sint | T.sfloat ] t))
-  | TFloat fty, ((TInt _ | TUInt _) as lit_ty) ->
+  | TFloat fty, (TInteger int_ty as lit_ty) ->
       let sv = Typed.cast_f fty v in
       let signed = Layout.is_signed lit_ty in
       let size = 8 * size_of_literal_ty lit_ty in
-      let min_z = Layout.min_value_z lit_ty in
-      let max_z = Layout.max_value_z lit_ty in
+      let min_z = Layout.min_value_z int_ty in
+      let max_z = Layout.max_value_z int_ty in
       let min_f = Typed.Float.of_z fty min_z in
       let max_f = Typed.Float.of_z fty (Z.succ max_z) in
       Typed.ite (Typed.Float.is_nan sv) (BV.mk_masked size Z.zero)
       @@ Typed.ite (sv <=.@ min_f) (BV.mk_masked size min_z)
       @@ Typed.ite (sv >=.@ max_f) (BV.mk_masked size max_z)
       @@ BV.of_float ~rounding:Truncate ~signed ~size sv
-  | (TInt _ | TUInt _), TFloat fp ->
+  | TInteger _, TFloat fp ->
       let sv = Typed.cast_lit from_ty v in
       let signed = Layout.is_signed from_ty in
       BV.to_float ~rounding:NearestTiesToEven ~signed ~fp sv
@@ -682,7 +679,7 @@ let cast_literal ~(from_ty : Types.literal_type) ~(to_ty : Types.literal_type)
         pp_literal_ty to_ty
   (* here we know we're only handling scalars: bool, char, or int/uint, so we
      can just resize the value as needed! *)
-  | (TInt _ | TUInt _ | TBool | TChar), (TInt _ | TUInt _ | TBool | TChar) ->
+  | (TInteger _ | TBool | TChar), (TInteger _ | TBool | TChar) ->
       let from_bits = 8 * Layout.size_of_literal_ty from_ty in
       let from_signed = Layout.is_signed from_ty in
       let to_bits = 8 * Layout.size_of_literal_ty to_ty in
@@ -755,16 +752,16 @@ let rec transmute_one ~(to_ty : Types.ty) (v : [< Typed.T.scalar ] Typed.t) :
     [> Typed.T.scalar ] Typed.t DecayMap.SM.t =
   match%ty (v, to_ty) with
   (* Same-kind transmutes are the identity. *)
-  | TBitVector _, TLiteral (TInt _ | TUInt _ | TBool | TChar) ->
+  | TBitVector _, TScalar (TInteger _ | TBool | TChar) ->
       return (Typed.as_any v)
-  | TFloat _, TLiteral (TFloat _) -> return (Typed.as_any v)
+  | TFloat _, TScalar (TFloat _) -> return (Typed.as_any v)
   | TExtension TFullPtr, (TRawPtr _ | TRef _ | TFnPtr _) ->
       return (Typed.as_any v)
-  | TBitVector _, TLiteral (TFloat _) -> return (BV.to_float_raw v)
-  | TExtension TFullPtr, TLiteral (TInt _ | TUInt _ | TBool | TChar) ->
+  | TBitVector _, TScalar (TFloat _) -> return (BV.to_float_raw v)
+  | TExtension TFullPtr, TScalar (TInteger _ | TBool | TChar) ->
       let ptr = Typed.Ptr.ptr_of v in
       Sptr.decay ptr
-  | TFloat _, TLiteral (TInt _ | TUInt _ | TBool | TChar) -> float_to_bv_bits v
+  | TFloat _, TScalar (TInteger _ | TBool | TChar) -> float_to_bv_bits v
   | TBitVector _, (TRawPtr _ | TRef _ | TFnPtr _) ->
       return (Typed.Ptr.of_address_f v)
   | _, TPattern (inner_ty, _) -> transmute_one ~to_ty:inner_ty v
@@ -801,10 +798,10 @@ let rec nondet_raw :
   let open Compo_res in
   let nondets_raw tys = Rustsymex.Result.map_list tys ~f:nondet_raw in
   function
-  | TLiteral (TFloat fp) ->
+  | TScalar (TFloat fp) ->
       let+ f = nondet (Typed.t_float fp) in
       Ok (f : Typed.(T.sfloat t) :> Typed.([> T.any ] t))
-  | TLiteral lit ->
+  | TScalar lit ->
       let+ i = nondet (Typed.t_lit lit) in
       Ok (i : Typed.(T.sint t) :> Typed.([> T.any ] t))
   | (TRef (_, pointee, _) | TRawPtr (pointee, _))
@@ -813,7 +810,7 @@ let rec nondet_raw :
       let+ ptr = nondet (Typed.t_ptr ()) in
       let ptr = Typed.Ptr.of_raw ~ptr ~size ~align ~tag:None in
       Ok (Typed.Ptr.of_ptr_t ptr)
-  | TArray (ty, len) ->
+  | TArray (ty, len, _) ->
       let size = z_of_constant_expr len in
       let* size =
         of_opt_not_impl "nondet: array length is too large" @@ Z.to_int_opt size
@@ -908,11 +905,11 @@ let rec ref_tys_in
   in
   let* ty = Poly.subst_ty ty in
   match ty with
-  | TRef (_, _, _) | TAdt { builtin = Some TBox; _ } ->
+  | TRef (_, _, _) ->
       let v = Typed.cast_ptr_f v in
       let++ res, acc = fn init ty v in
       (Typed.as_any res, acc)
-  | TAdt adt when adt_is_box adt ->
+  | TAdt { builtin = Some TBox; _ } ->
       let ptr, allocator, marker = unwrap_box v in
       let++ ptr, acc = fn init ty ptr in
       (mk_box ptr allocator marker, acc)
@@ -922,7 +919,7 @@ let rec ref_tys_in
         fs' init (Crate.as_struct_tys adt) (Typed.Adt.as_tuple v)
       in
       (Typed.Adt.mk_tuple vs, acc)
-  | TArray (ty, _) | TSlice ty ->
+  | TArray (ty, _, _) | TSlice (ty, _) ->
       let v = Typed.cast_array v in
       let++ vs, acc = fs init ty (Typed.Adt.as_array v) in
       (Typed.Adt.mk_array ty (Iarray.of_list vs), acc)
@@ -956,10 +953,10 @@ let rec size_and_align_of_val ~load_vtable ~t ~(ptr : Typed.([< T.sptr_f ] t)) =
         let size, ovf_mul = layout.size *?@ len in
         let++ () = assert_or_error (Typed.not ovf_mul) `Overflow in
         (size, layout.align)
-    | TDynTrait _ ->
+    | TDynTrait dyn_pred ->
         let meta = Typed.Ptr.vtable_meta ptr in
-        let** size = load_vtable `Size meta in
-        let++ align = load_vtable `Align meta in
+        let** size = load_vtable dyn_pred Types.VTableSize meta in
+        let++ align = load_vtable dyn_pred Types.VTableAlign meta in
         let size = Typed.cast_i Usize size in
         let align = Typed.cast_i Usize align in
         (size, Typed.cast_nonzero align)

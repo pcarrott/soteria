@@ -71,7 +71,7 @@ module M (StateM : State.StateM.S) = struct
       | [ key; dtor ] -> (Typed.cast_ptr_f key, dtor)
       | _ -> failwith "pthread_key_create: unexpected arguments"
     in
-    let* () = State.store key (TLiteral (TUInt U32)) U32.(1s) in
+    let* () = State.store key (TScalar (TInteger (Unsigned U32))) U32.(1s) in
     let* dtor =
       State.transmute ~from:(List.nth fun_sig.inputs 1) ~to_:unit_ptr dtor
     in

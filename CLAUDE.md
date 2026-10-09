@@ -110,6 +110,7 @@ Tests use two frameworks:
 ## Soundness Invariants
 
 - **No mutable state threaded through symex/analysis state.** Symbolic execution forks and resumes execution states, so any in-place mutation of a value reachable from a saved state leaks across paths: one branch mutates it and a *different* branch later observes the mutation. Representations carried in symex/analysis state must be persistent/immutable (e.g. PatriciaTree maps/sets, functional records). Mutation is acceptable **only** for a *global, reusable, path-independent cache* that memoizes a pure function. When optimizing data structures here, reach for persistent structures, not `array`s/`ref`s in the state. (A TB `tb_state` bucketing change used a mutable `array` index and was reverted for this reason — it only appeared to work on a concrete benchmark that never branches symbolically.)
+- **Avoid concrete reasoning.** When symbolic reasoning is possible, favour a symbolic implementation rather than a concrete one that is less complete or may branch. The values are reduced eagerly and efficiently, so it's virtually free to construct symbolic values.
 
 ## Code Style
 

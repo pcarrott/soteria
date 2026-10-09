@@ -133,10 +133,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let copysignf16 ~x:_ ~y:_ = not_impl "Unsupported intrinsic: copysignf16"
   let copysignf32 ~x:_ ~y:_ = not_impl "Unsupported intrinsic: copysignf32"
   let copysignf64 ~x:_ ~y:_ = not_impl "Unsupported intrinsic: copysignf64"
-  let cosf128 ~x:_ = not_impl "Unsupported intrinsic: cosf128"
-  let cosf16 ~x:_ = not_impl "Unsupported intrinsic: cosf16"
-  let cosf32 ~x:_ = not_impl "Unsupported intrinsic: cosf32"
-  let cosf64 ~x:_ = not_impl "Unsupported intrinsic: cosf64"
+  let cos ~t:_ ~x:_ = not_impl "Unsupported intrinsic: cos"
   let ctlz ~t:_ ~x:_ = not_impl "Unsupported intrinsic: ctlz"
   let ctlz_nonzero ~t:_ ~x:_ = not_impl "Unsupported intrinsic: ctlz_nonzero"
   let ctpop ~t:_ ~x:_ = not_impl "Unsupported intrinsic: ctpop"
@@ -150,14 +147,8 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     not_impl "Unsupported intrinsic: disjoint_bitor"
 
   let exact_div ~t:_ ~x:_ ~y:_ = not_impl "Unsupported intrinsic: exact_div"
-  let exp2f128 ~x:_ = not_impl "Unsupported intrinsic: exp2f128"
-  let exp2f16 ~x:_ = not_impl "Unsupported intrinsic: exp2f16"
-  let exp2f32 ~x:_ = not_impl "Unsupported intrinsic: exp2f32"
-  let exp2f64 ~x:_ = not_impl "Unsupported intrinsic: exp2f64"
-  let expf128 ~x:_ = not_impl "Unsupported intrinsic: expf128"
-  let expf16 ~x:_ = not_impl "Unsupported intrinsic: expf16"
-  let expf32 ~x:_ = not_impl "Unsupported intrinsic: expf32"
-  let expf64 ~x:_ = not_impl "Unsupported intrinsic: expf64"
+  let exp ~t:_ ~x:_ = not_impl "Unsupported intrinsic: exp"
+  let exp2 ~t:_ ~x:_ = not_impl "Unsupported intrinsic: exp2"
   let fabs ~t:_ ~x:_ = not_impl "Unsupported intrinsic: fabs"
 
   let fadd_algebraic ~t:_ ~a:_ ~b:_ =
@@ -211,22 +202,15 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     not_impl "Unsupported intrinsic: fsub_algebraic"
 
   let fsub_fast ~t:_ ~a:_ ~b:_ = not_impl "Unsupported intrinsic: fsub_fast"
+  let integer_max ~t:_ ~a:_ ~b:_ = not_impl "Unsupported intrinsic: integer_max"
+  let integer_min ~t:_ ~a:_ ~b:_ = not_impl "Unsupported intrinsic: integer_min"
 
   let is_val_statically_known ~t:_ ~arg:_ =
     not_impl "Unsupported intrinsic: is_val_statically_known"
 
-  let log10f128 ~x:_ = not_impl "Unsupported intrinsic: log10f128"
-  let log10f16 ~x:_ = not_impl "Unsupported intrinsic: log10f16"
-  let log10f32 ~x:_ = not_impl "Unsupported intrinsic: log10f32"
-  let log10f64 ~x:_ = not_impl "Unsupported intrinsic: log10f64"
-  let log2f128 ~x:_ = not_impl "Unsupported intrinsic: log2f128"
-  let log2f16 ~x:_ = not_impl "Unsupported intrinsic: log2f16"
-  let log2f32 ~x:_ = not_impl "Unsupported intrinsic: log2f32"
-  let log2f64 ~x:_ = not_impl "Unsupported intrinsic: log2f64"
-  let logf128 ~x:_ = not_impl "Unsupported intrinsic: logf128"
-  let logf16 ~x:_ = not_impl "Unsupported intrinsic: logf16"
-  let logf32 ~x:_ = not_impl "Unsupported intrinsic: logf32"
-  let logf64 ~x:_ = not_impl "Unsupported intrinsic: logf64"
+  let log ~t:_ ~x:_ = not_impl "Unsupported intrinsic: log"
+  let log10 ~t:_ ~x:_ = not_impl "Unsupported intrinsic: log10"
+  let log2 ~t:_ ~x:_ = not_impl "Unsupported intrinsic: log2"
 
   let maximum_number_nsz_f128 ~x:_ ~y:_ =
     not_impl "Unsupported intrinsic: maximum_number_nsz_f128"
@@ -272,8 +256,11 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     not_impl "Unsupported intrinsic: nontemporal_store"
 
   let offload ~t_f:_ ~t:_ ~r:_ ~f:_ ~workgroup_dim:_ ~thread_dim:_ ~dyn_cache:_
-      ~args:_ =
+      ~device_id:_ ~args:_ =
     not_impl "Unsupported intrinsic: offload"
+
+  let offload_get_num_devices () =
+    not_impl "Unsupported intrinsic: offload_get_num_devices"
 
   let offset ~ptr:_ ~delta:_ ~dst:_ ~offset:_ =
     not_impl "Unsupported intrinsic: offset"
@@ -520,10 +507,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     not_impl "Unsupported intrinsic: simd_with_exposed_provenance"
 
   let simd_xor ~t:_ ~x:_ ~y:_ = not_impl "Unsupported intrinsic: simd_xor"
-  let sinf128 ~x:_ = not_impl "Unsupported intrinsic: sinf128"
-  let sinf16 ~x:_ = not_impl "Unsupported intrinsic: sinf16"
-  let sinf32 ~x:_ = not_impl "Unsupported intrinsic: sinf32"
-  let sinf64 ~x:_ = not_impl "Unsupported intrinsic: sinf64"
+  let sin ~t:_ ~x:_ = not_impl "Unsupported intrinsic: sin"
   let size_of ~t:_ = not_impl "Unsupported intrinsic: size_of"
   let size_of_type_id ~id:_ = not_impl "Unsupported intrinsic: size_of_type_id"
   let size_of_val ~t:_ ~ptr:_ = not_impl "Unsupported intrinsic: size_of_val"
@@ -567,6 +551,13 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let truncf16 ~x:_ = not_impl "Unsupported intrinsic: truncf16"
   let truncf32 ~x:_ = not_impl "Unsupported intrinsic: truncf32"
   let truncf64 ~x:_ = not_impl "Unsupported intrinsic: truncf64"
+
+  let type_id_array_len ~id:_ =
+    not_impl "Unsupported intrinsic: type_id_array_len"
+
+  let type_id_element_ty ~id:_ =
+    not_impl "Unsupported intrinsic: type_id_element_ty"
+
   let type_id_eq ~a:_ ~b:_ = not_impl "Unsupported intrinsic: type_id_eq"
 
   let type_id_field_representing_type ~id:_ ~variant_index:_ ~field_index:_ =
@@ -575,11 +566,20 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let type_id_fields ~id:_ ~variant_index:_ =
     not_impl "Unsupported intrinsic: type_id_fields"
 
+  let type_id_function_ptr ~type_id:_ =
+    not_impl "Unsupported intrinsic: type_id_function_ptr"
+
   let type_id_generics ~id:_ =
     not_impl "Unsupported intrinsic: type_id_generics"
 
   let type_id_is_signed ~id:_ =
     not_impl "Unsupported intrinsic: type_id_is_signed"
+
+  let type_id_points_mutably ~id:_ =
+    not_impl "Unsupported intrinsic: type_id_points_mutably"
+
+  let type_id_points_to ~id:_ =
+    not_impl "Unsupported intrinsic: type_id_points_to"
 
   let type_id_variants ~id:_ =
     not_impl "Unsupported intrinsic: type_id_variants"
@@ -633,6 +633,12 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let va_copy ~src:_ = not_impl "Unsupported intrinsic: va_copy"
   let va_end ~ap:_ = not_impl "Unsupported intrinsic: va_end"
   let variant_count ~t:_ = not_impl "Unsupported intrinsic: variant_count"
+
+  let variant_name ~base:_ ~variant_index:_ =
+    not_impl "Unsupported intrinsic: variant_name"
+
+  let variant_non_exhaustive ~base:_ ~variant:_ =
+    not_impl "Unsupported intrinsic: variant_non_exhaustive"
 
   let volatile_copy_memory ~t:_ ~dst:_ ~src:_ ~count:_ =
     not_impl "Unsupported intrinsic: volatile_copy_memory"

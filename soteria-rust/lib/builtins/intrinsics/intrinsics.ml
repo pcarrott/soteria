@@ -180,18 +180,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
         let x = Typed.cast_f F64 x in
         let y = Typed.cast_f F64 y in
         copysignf64 ~x ~y
-    | "cosf128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        cosf128 ~x
-    | "cosf16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        cosf16 ~x
-    | "cosf32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        cosf32 ~x
-    | "cosf64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        cosf64 ~x
+    | "cos", [ t ], [], [ x ] -> cos ~t ~x
     | "ctlz", [ t ], [], [ x ] -> ctlz ~t ~x
     | "ctlz_nonzero", [ t ], [], [ x ] -> ctlz_nonzero ~t ~x
     | "ctpop", [ t ], [], [ x ] -> ctpop ~t ~x
@@ -202,30 +191,8 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
         discriminant_value ~t ~v
     | "disjoint_bitor", [ t ], [], [ a; b ] -> disjoint_bitor ~t ~a ~b
     | "exact_div", [ t ], [], [ x; y ] -> exact_div ~t ~x ~y
-    | "exp2f128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        exp2f128 ~x
-    | "exp2f16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        exp2f16 ~x
-    | "exp2f32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        exp2f32 ~x
-    | "exp2f64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        exp2f64 ~x
-    | "expf128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        expf128 ~x
-    | "expf16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        expf16 ~x
-    | "expf32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        expf32 ~x
-    | "expf64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        expf64 ~x
+    | "exp", [ t ], [], [ x ] -> exp ~t ~x
+    | "exp2", [ t ], [], [ x ] -> exp2 ~t ~x
     | "fabs", [ t ], [], [ x ] -> fabs ~t ~x
     | "fadd_algebraic", [ t ], [], [ a; b ] -> fadd_algebraic ~t ~a ~b
     | "fadd_fast", [ t ], [], [ a; b ] -> fadd_fast ~t ~a ~b
@@ -304,45 +271,14 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
     | "frem_fast", [ t ], [], [ a; b ] -> frem_fast ~t ~a ~b
     | "fsub_algebraic", [ t ], [], [ a; b ] -> fsub_algebraic ~t ~a ~b
     | "fsub_fast", [ t ], [], [ a; b ] -> fsub_fast ~t ~a ~b
+    | "integer_max", [ t ], [], [ a; b ] -> integer_max ~t ~a ~b
+    | "integer_min", [ t ], [], [ a; b ] -> integer_min ~t ~a ~b
     | "is_val_statically_known", [ t ], [], [ arg ] ->
         let+ ret = is_val_statically_known ~t ~arg in
         Typed.BitVec.of_bool ret
-    | "log10f128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        log10f128 ~x
-    | "log10f16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        log10f16 ~x
-    | "log10f32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        log10f32 ~x
-    | "log10f64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        log10f64 ~x
-    | "log2f128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        log2f128 ~x
-    | "log2f16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        log2f16 ~x
-    | "log2f32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        log2f32 ~x
-    | "log2f64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        log2f64 ~x
-    | "logf128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        logf128 ~x
-    | "logf16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        logf16 ~x
-    | "logf32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        logf32 ~x
-    | "logf64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        logf64 ~x
+    | "log", [ t ], [], [ x ] -> log ~t ~x
+    | "log10", [ t ], [], [ x ] -> log10 ~t ~x
+    | "log2", [ t ], [], [ x ] -> log2 ~t ~x
     | "maximum_number_nsz_f128", [], [], [ x; y ] ->
         let x = Typed.cast_f F128 x in
         let y = Typed.cast_f F128 y in
@@ -422,11 +358,14 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
     | ( "offload",
         [ t_f; t; r ],
         [],
-        [ f; workgroup_dim; thread_dim; dyn_cache; args ] ) ->
+        [ f; workgroup_dim; thread_dim; dyn_cache; device_id; args ] ) ->
         let workgroup_dim = Typed.cast_tuple workgroup_dim in
         let thread_dim = Typed.cast_tuple thread_dim in
         let dyn_cache = Typed.cast_i U32 dyn_cache in
-        offload ~t_f ~t ~r ~f ~workgroup_dim ~thread_dim ~dyn_cache ~args
+        let device_id = Typed.cast_i U32 device_id in
+        offload ~t_f ~t ~r ~f ~workgroup_dim ~thread_dim ~dyn_cache ~device_id
+          ~args
+    | "offload_get_num_devices", [], [], [] -> offload_get_num_devices ()
     | "offset", [ ptr; delta ], [], [ dst; offset_ ] ->
         offset ~ptr ~delta ~dst ~offset:offset_
     | "offset_of", [ t ], [], [ variant; field ] ->
@@ -656,18 +595,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
     | "simd_with_exposed_provenance", [ t; u ], [], [ addr ] ->
         simd_with_exposed_provenance ~t ~u ~addr
     | "simd_xor", [ t ], [], [ x; y ] -> simd_xor ~t ~x ~y
-    | "sinf128", [], [], [ x ] ->
-        let x = Typed.cast_f F128 x in
-        sinf128 ~x
-    | "sinf16", [], [], [ x ] ->
-        let x = Typed.cast_f F16 x in
-        sinf16 ~x
-    | "sinf32", [], [], [ x ] ->
-        let x = Typed.cast_f F32 x in
-        sinf32 ~x
-    | "sinf64", [], [], [ x ] ->
-        let x = Typed.cast_f F64 x in
-        sinf64 ~x
+    | "sin", [ t ], [], [ x ] -> sin ~t ~x
     | "size_of", [ t ], [], [] -> size_of ~t
     | "size_of_type_id", [], [], [ id ] ->
         let id = Typed.cast_tuple id in
@@ -719,6 +647,12 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
     | "truncf64", [], [], [ x ] ->
         let x = Typed.cast_f F64 x in
         truncf64 ~x
+    | "type_id_array_len", [], [], [ id ] ->
+        let id = Typed.cast_tuple id in
+        type_id_array_len ~id
+    | "type_id_element_ty", [], [], [ id ] ->
+        let id = Typed.cast_tuple id in
+        type_id_element_ty ~id
     | "type_id_eq", [], [], [ a; b ] ->
         let a = Typed.cast_tuple a in
         let b = Typed.cast_tuple b in
@@ -736,6 +670,9 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
         let id = Typed.cast_tuple id in
         let variant_index = Typed.cast_i Usize variant_index in
         type_id_fields ~id ~variant_index
+    | "type_id_function_ptr", [], [], [ type_id ] ->
+        let type_id = Typed.cast_tuple type_id in
+        type_id_function_ptr ~type_id
     | "type_id_generics", [], [], [ id ] ->
         let id = Typed.cast_tuple id in
         type_id_generics ~id
@@ -743,6 +680,13 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
         let id = Typed.cast_tuple id in
         let+ ret = type_id_is_signed ~id in
         Typed.BitVec.of_bool ret
+    | "type_id_points_mutably", [], [], [ id ] ->
+        let id = Typed.cast_tuple id in
+        let+ ret = type_id_points_mutably ~id in
+        Typed.BitVec.of_bool ret
+    | "type_id_points_to", [], [], [ id ] ->
+        let id = Typed.cast_tuple id in
+        type_id_points_to ~id
     | "type_id_variants", [], [], [ id ] ->
         let id = Typed.cast_tuple id in
         type_id_variants ~id
@@ -796,6 +740,15 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
         let+ () = va_end ~ap in
         Typed.Adt.unit
     | "variant_count", [ t ], [], [] -> variant_count ~t
+    | "variant_name", [], [], [ base; variant_index ] ->
+        let base = Typed.cast_tuple base in
+        let variant_index = Typed.cast_i Usize variant_index in
+        variant_name ~base ~variant_index
+    | "variant_non_exhaustive", [], [], [ base; variant ] ->
+        let base = Typed.cast_tuple base in
+        let variant = Typed.cast_i Usize variant in
+        let+ ret = variant_non_exhaustive ~base ~variant in
+        Typed.BitVec.of_bool ret
     | "volatile_copy_memory", [ t ], [], [ dst; src; count ] ->
         let dst = Typed.cast_ptr_f dst in
         let src = Typed.cast_ptr_f src in

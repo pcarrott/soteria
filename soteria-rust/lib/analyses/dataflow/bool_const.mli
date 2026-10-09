@@ -8,7 +8,7 @@ type t
 
 (** [analyse_fun fn] is the known-constant environment at the {e exit} of each
     block of [fn]'s body (i.e. what the block's terminator observes), indexed by
-    {!Charon.UllbcAst.BlockId.to_int}, memoised across calls. Empty for a
+    [Charon.UllbcAst.BlockId.to_int], memoised across calls. Empty for a
     function without an unstructured body. *)
 val analyse_fun : Types.FunDeclId.id -> t iarray
 

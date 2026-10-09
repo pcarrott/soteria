@@ -55,7 +55,7 @@ module Never : Analysis.Domain.S with type t = bool = struct
     match kind with
     | Return -> true
     (* Unwinding terminators diverge: they never reach a normal return. *)
-    | Abort _ | UnwindResume -> false
+    | Panic _ | UnwindTerminate | UndefinedBehavior | UnwindResume -> false
     | Call (c, _, _) ->
         (* If call diverges, then the entire thing diverges *)
         summary c && input
@@ -63,13 +63,18 @@ module Never : Analysis.Domain.S with type t = bool = struct
 
   let live_successors ~fn ~block (kind : UllbcAst.terminator_kind) =
     match kind with
-    | Switch (op, If (b1, b2)) -> (
+    | Switch (({ scrutinee = SwitchValue op; _ } as data), targets) -> (
         (* If the guard is a statically-known boolean, only one branch is
            live. *)
-        match Bool_const.eval_bool_at fn block op with
-        | Some true -> [ b1 ]
-        | Some false -> [ b2 ]
-        | None -> [ b1; b2 ])
+        match GAstUtils.switch_as_if data with
+        | None -> targets
+        | Some (b1, b2) -> (
+            let b1 = GAst.BranchId.nth targets b1 in
+            let b2 = GAst.BranchId.nth targets b2 in
+            match Bool_const.eval_bool_at fn block op with
+            | Some true -> [ b1 ]
+            | Some false -> [ b2 ]
+            | None -> [ b1; b2 ]))
     (* For everything else the default CFG successors are fine: a [Drop] or
        [TAssert] is assumed to succeed (its unwind edge cannot reach a return,
        so joining it is harmless), and [Call] is handled by {!terminator}. *)

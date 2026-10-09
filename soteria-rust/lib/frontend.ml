@@ -51,8 +51,8 @@ module Lib = struct
   (** Deletes the target directory of a target, to avoid duplicate builds *)
   let clean lib = ignore (exec_cargo lib [ "clean" ])
 
-  (** A target Cargo built, and the files it emitted for it. *)
-  type artifact = { name : string; files : string list }
+  (** A target Cargo built, its kinds, and the files it emitted for it. *)
+  type artifact = { name : string; kinds : string list; files : string list }
 
   (** The artifacts Cargo built, as listed by the [compiler-artifact] messages
       of its JSON output.
@@ -62,7 +62,7 @@ module Lib = struct
       {[
       {
         "reason": "compiler-artifact",
-        "target": { "name": "plugin", ... },
+        "target": { "name": "plugin", "kind": [ "lib" ], ... },
         "filenames": [
           "/path/to/plugin/target/<target>/debug/libplugin.rlib",
           "/path/to/plugin/target/<target>/debug/build/plugin/<hash>/out/libplugin-<hash>.rmeta"
@@ -84,6 +84,7 @@ module Lib = struct
     |> Iter.map (fun json ->
         {
           name = json $ "target" $ "name" |> to_string;
+          kinds = json $ "target" $ "kind" |> to_list |> filter_string;
           files = json $ "filenames" |> to_list |> filter_string;
         })
     |> Iter.to_list
@@ -94,15 +95,27 @@ module Lib = struct
     let artifact =
       List.find (fun a -> String.equal a.name (name lib)) artifacts
     in
-    let rlib =
-      List.find (fun f -> Filename.check_suffix f ".rlib") artifact.files
+    let externs =
+      artifact.files
+      |> List.filter (fun f ->
+          Filename.check_suffix f ".rlib" || Filename.check_suffix f ".rmeta")
+      |> List.concat_map (fun f -> [ "--extern"; name lib ^ "=" ^ f ])
+    in
+    let is_dependency a =
+      (not (String.equal a.name (name lib)))
+      && List.exists
+           (fun k -> List.mem k [ "lib"; "rlib"; "proc-macro" ])
+           a.kinds
     in
     let search_dirs =
       artifacts
+      |> List.filter is_dependency
       |> List.concat_map (fun a -> a.files)
-      |> List.map (fun dir -> "-L" ^ Filename.dirname dir)
+      |> List.map Filename.dirname
+      |> List.sort_uniq String.compare
+      |> List.concat_map (fun dir -> [ "-L"; "dependency=" ^ dir ])
     in
-    [ "--extern"; name lib ^ "=" ^ rlib ] @ search_dirs
+    externs @ search_dirs
 
   (** File used to cache the rustc flags of a library. Allows
       [--no-compile-plugins] to reuse the last build. *)
@@ -184,6 +197,7 @@ let default () =
          "--format=postcard";
          "--no-typecheck";
          "--no-normalize";
+         "--hide-marker-traits";
          (* Tell Charon to not specify any sysroot; we have our own *)
          "--sysroot=default";
        ]

@@ -579,8 +579,12 @@ def cmd_pull(args: argparse.Namespace, root: Path, versions: dict[str, str]) -> 
             "repo_key": "CHARON_REPO",
             "version_key": "CHARON_COMMIT_HASH",
             "default_dir": root.parent / "charon",
-            "build_cmd": "make build-charon-rust",
-            "post_build_cmds": [],
+            "build_cmd": "cargo build --release --manifest-path charon/Cargo.toml --no-default-features --features rustc",
+            "post_build_cmds": [
+                ["mkdir", "-p", "bin"],
+                ["cp", "-f", "charon/target/release/charon", "bin"],
+                ["cp", "-f", "charon/target/release/charon-driver", "bin"],
+            ],
         },
     }
 

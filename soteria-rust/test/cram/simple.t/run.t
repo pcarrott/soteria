@@ -4,32 +4,32 @@ Test memory leaks
   => Running leak::main...
   error: leak::main: found issues in <time>, errors in 1 branch (out of 1)
   warning: Memory leak in leak::main
-      --> $RUSTLIB/library/alloc/src/alloc.rs:130:9
-  130 |            __rust_alloc(layout.size(), layout.alignment())
+      --> $RUSTLIB/library/alloc/src/alloc.rs:131:9
+  131 |            __rust_alloc(layout.size(), layout.alignment())
       |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
       |            |
       |            Triggering operation
       |            8: Allocation
       .    
-  302 |                    let raw_ptr = if zeroed { alloc_zeroed(layout) } else { alloc(layout) };
+  308 |                    let raw_ptr = if zeroed { alloc_zeroed(layout) } else { alloc(layout) };
       |                                                                            ------------- 7: Call trace
       .    
-  423 |        const fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
-  424 | /          core::intrinsics::const_eval_select(
-  425 | |              (layout, zeroed),
-  426 | |              Global::alloc_impl_const,
-  427 | |              Global::alloc_impl_runtime,
-  428 | |          )
+  429 |        const fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
+  430 | /          core::intrinsics::const_eval_select(
+  431 | |              (layout, zeroed),
+  432 | |              Global::alloc_impl_const,
+  433 | |              Global::alloc_impl_runtime,
+  434 | |          )
       | \----------' 6: Call trace
-  429 |        }
+  435 |        }
       .    
-  541 |            self.alloc_impl(layout, false)
+  548 |            self.alloc_impl(layout, false)
       |            ------------------------------ 5: Call trace
-      --> $RUSTLIB/library/alloc/src/boxed.rs:290:19
+      --> $RUSTLIB/library/alloc/src/boxed.rs:292:19
   251 |        match Global.allocate(layout) {
       |              ----------------------- 4: Call trace
       .    
-  290 |            let ptr = box_new_uninit(<T as SizedTypeProperties>::LAYOUT) as *mut T;
+  292 |            let ptr = box_new_uninit(<T as SizedTypeProperties>::LAYOUT) as *mut T;
       |                      -------------------------------------------------- 3: Call trace
       --> $TESTCASE_ROOT/leak.rs:2:22
     1 |    fn main() {
@@ -128,8 +128,8 @@ Check strict provenance disables int to ptr casts
   => Running provenance::with_exposed...
   error: provenance::with_exposed: found issues in <time>, errors in 1 branch (out of 1)
   bug: Attempted to cast an integer to an pointer with strict provenance in provenance::with_exposed
-       --> $RUSTLIB/library/core/src/ptr/mod.rs:1027:5
-  1027 |      addr as *const T
+       --> $RUSTLIB/library/core/src/ptr/mod.rs:1028:5
+  1028 |      addr as *const T
        |      ^^^^^^^^^^^^^^^^ Casting integer to pointer
        --> $TESTCASE_ROOT/provenance.rs:6:18
      2 |  fn with_exposed() {
@@ -547,7 +547,7 @@ Test exactly-evaluated float operations, at every precision
   
   Statistics:
   • Z3 check-sat calls: 27
-  • branch_on: branches 1.18% of calls (16 of 1356)
+  • branch_on: branches 0.72% of calls (16 of 2207)
   • Execution time: <time>
   • Steps: 567
   • Function calls: 257
@@ -1130,8 +1130,8 @@ Test that `align_offset` is answered from the allocation's alignment
   => Running align_offset::alignment_is_not_a_power_of_two...
   error: align_offset::alignment_is_not_a_power_of_two: found issues in <time>, errors in 1 branch (out of 1)
   error: Panic in align_offset::alignment_is_not_a_power_of_two
-       --> $RUSTLIB/library/core/src/ptr/const_ptr.rs:1282:13
-  1282 |              panic!("align_offset: align is not a power-of-two");
+       --> $RUSTLIB/library/core/src/ptr/const_ptr.rs:1283:13
+  1283 |              panic!("align_offset: align is not a power-of-two");
        |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
        |              |
        |              Triggering operation

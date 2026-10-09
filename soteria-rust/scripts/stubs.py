@@ -76,23 +76,27 @@ class TypeAdt(TypedDict):
     Adt: InnerTypeAdt
 
 
-class TypeLiteralUInt(TypedDict):
-    UInt: str
+class IntegerTypeUnsigned(TypedDict):
+    Unsigned: str
 
 
-class TypeLiteralInt(TypedDict):
-    Int: str
+class IntegerTypeSigned(TypedDict):
+    Signed: str
 
 
-class TypeLiteralFloat(TypedDict):
+class TypeScalarInteger(TypedDict):
+    Integer: IntegerTypeUnsigned | IntegerTypeSigned
+
+
+class TypeScalarFloat(TypedDict):
     Float: str
 
 
-TypeLiteralBool = Literal["Bool"]
+TypeScalarBool = Literal["Bool"]
 
 
-class TypeLiteral(TypedDict):
-    Literal: TypeLiteralUInt | TypeLiteralInt | TypeLiteralFloat | TypeLiteralBool
+class TypeScalar(TypedDict):
+    Scalar: TypeScalarInteger | TypeScalarFloat | TypeScalarBool
 
 
 class TypeTypeVar(TypedDict):
@@ -111,10 +115,10 @@ TypeNever = Literal["Never"]
 
 
 class TypeArray(TypedDict):
-    Array: tuple["UniqueType", "UniqueType"]
+    Array: tuple["UniqueType", Any, Any]
 
 
-Type = TypeAdt | TypeLiteral | TypeTypeVar | TypeRef | TypePtr | TypeNever | TypeArray
+Type = TypeAdt | TypeScalar | TypeTypeVar | TypeRef | TypePtr | TypeNever | TypeArray
 
 
 class DedupedType(TypedDict):
@@ -122,7 +126,7 @@ class DedupedType(TypedDict):
 
 
 class HashConsedType(TypedDict):
-    HashConsedValue: tuple[int, Type]
+    Value: tuple[int, Type]
 
 
 UniqueType = DedupedType | HashConsedType
@@ -223,8 +227,8 @@ def charon_type_of(unique_ty: UniqueType) -> Type:
         if type_id not in type_cache:
             raise ValueError(f"Unknown deduplicated type id: {type_id}")
         return type_cache[type_id]
-    elif "HashConsedValue" in unique_ty:
-        type_id, inner_ty = unique_ty["HashConsedValue"]
+    elif "Value" in unique_ty:
+        type_id, inner_ty = unique_ty["Value"]
         type_cache[type_id] = inner_ty
         return inner_ty
     raise ValueError("Invalid UniqueType: " + str(unique_ty))
@@ -237,17 +241,16 @@ def type_of(unique_ty: UniqueType) -> InterpType:
     if ty == "Never":
         return "unit", None
 
-    if "Literal" in ty:
-        if ty["Literal"] == "Bool":
+    if "Scalar" in ty:
+        if ty["Scalar"] == "Bool":
             return "bool", None
-        if "Int" in ty["Literal"] or "UInt" in ty["Literal"]:
+        if "Integer" in ty["Scalar"]:
+            int_ty = ty["Scalar"]["Integer"]
             return "int", (
-                ty["Literal"]["Int"]
-                if "Int" in ty["Literal"]
-                else ty["Literal"]["UInt"]
+                int_ty["Signed"] if "Signed" in int_ty else int_ty["Unsigned"]
             )
-        if "Float" in ty["Literal"]:
-            return "float", ty["Literal"]["Float"]
+        if "Float" in ty["Scalar"]:
+            return "float", ty["Scalar"]["Float"]
 
     if "RawPtr" in ty or "Ref" in ty or "FnPtr" in ty:
         return "ptr", None
@@ -281,6 +284,30 @@ def type_of(unique_ty: UniqueType) -> InterpType:
     return "unknown", None
 
 
+TYPE_KINDS = {
+    "Scalar",
+    "Array",
+    "Slice",
+    "Adt",
+    "Ref",
+    "RawPtr",
+    "FnDef",
+    "FnPtr",
+    "DynTrait",
+    "Pattern",
+    "TypeVar",
+    "TraitType",
+    "PtrMetadata",
+    "Error",
+}
+
+
+def is_type_kind(x: Any) -> bool:
+    if x == "Never":
+        return True
+    return isinstance(x, dict) and len(x) == 1 and next(iter(x)) in TYPE_KINDS
+
+
 # try traversing the whole JSON to cache all types
 def traverse_types(x: Any, prev_key: Optional[str] = None) -> None:
     if isinstance(x, list):
@@ -291,19 +318,15 @@ def traverse_types(x: Any, prev_key: Optional[str] = None) -> None:
     if not isinstance(x, dict):
         return
 
-    invalid_prev_keys = [
-        "tref",
-        "trait_ref",
-        "trait_refs",
-        "parent_trait_refs",
-        "implied_trait_refs",
-        "Trait",
-        "ParentClause",
-        "TraitType",
-        "TraitConst",
-    ]
-    if "HashConsedValue" in x and prev_key not in invalid_prev_keys:
-        type_id, inner_ty = x["HashConsedValue"]
+    # Values of different kinds (types, spans, trait refs, ...) are deduplicated
+    # separately, so we only cache those that are types.
+    if (
+        "Value" in x
+        and isinstance(x["Value"], list)
+        and len(x["Value"]) == 2
+        and is_type_kind(x["Value"][1])
+    ):
+        type_id, inner_ty = x["Value"]
         type_cache[type_id] = inner_ty
         # print(f"Cache ({prev_key}) <-", type_id, inner_ty)
 

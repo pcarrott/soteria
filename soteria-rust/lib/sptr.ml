@@ -152,7 +152,7 @@ module DecayMap : DecayMapS = struct
          | None ->
              Soteria.Stats.As_ctx.incr Rustsymex.StatKeys.decayed_pointers;
              let* address = nondet_aligned_address align in
-             let isize_max = Layout.max_value_z (TInt Isize) in
+             let isize_max = Layout.max_value_z (Signed Isize) in
              (* Distinct allocations live at distinct addresses. We
                 under-approximate this by only requiring the base addresses to
                 differ. *)

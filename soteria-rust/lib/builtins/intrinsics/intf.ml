@@ -816,36 +816,12 @@ module M (StateM : State.StateM.S) = struct
       Typed.([> T.sfloat ] t) ret
 
     (** {@markdown[
-        Returns the cosine of an `f128`.
+        Returns the cosine of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f128::cos`](../../std/primitive.f128.html#method.cos)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `cos` method. For example, [`f32::cos`](../../std/primitive.f32.html#method.cos).
         ]} *)
-    val cosf128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the cosine of an `f16`.
-
-         The stabilized version of this intrinsic is
-         [`f16::cos`](../../std/primitive.f16.html#method.cos)
-        ]} *)
-    val cosf16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the cosine of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::cos`](../../std/primitive.f32.html#method.cos)
-        ]} *)
-    val cosf32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the cosine of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::cos`](../../std/primitive.f64.html#method.cos)
-        ]} *)
-    val cosf64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val cos : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
         Returns the number of leading unset bits (zeroes) in an integer type `T`.
@@ -1031,68 +1007,20 @@ module M (StateM : State.StateM.S) = struct
       Typed.([> T.any ] t) ret
 
     (** {@markdown[
-        Returns 2 raised to the power of an `f128`.
+        Returns the exponential of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f128::exp2`](../../std/primitive.f128.html#method.exp2)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `exp` method. For example, [`f32::exp`](../../std/primitive.f32.html#method.exp).
         ]} *)
-    val exp2f128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val exp : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
-        Returns 2 raised to the power of an `f16`.
+        Returns 2 raised to the power of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f16::exp2`](../../std/primitive.f16.html#method.exp2)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `exp2` method. For example, [`f32::exp2`](../../std/primitive.f32.html#method.exp2).
         ]} *)
-    val exp2f16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns 2 raised to the power of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::exp2`](../../std/primitive.f32.html#method.exp2)
-        ]} *)
-    val exp2f32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns 2 raised to the power of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::exp2`](../../std/primitive.f64.html#method.exp2)
-        ]} *)
-    val exp2f64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the exponential of an `f128`.
-
-         The stabilized version of this intrinsic is
-         [`f128::exp`](../../std/primitive.f128.html#method.exp)
-        ]} *)
-    val expf128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the exponential of an `f16`.
-
-         The stabilized version of this intrinsic is
-         [`f16::exp`](../../std/primitive.f16.html#method.exp)
-        ]} *)
-    val expf16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the exponential of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::exp`](../../std/primitive.f32.html#method.exp)
-        ]} *)
-    val expf32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the exponential of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::exp`](../../std/primitive.f64.html#method.exp)
-        ]} *)
-    val expf64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val exp2 : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
         Returns the absolute value of a floating-point value.
@@ -1438,6 +1366,34 @@ module M (StateM : State.StateM.S) = struct
       Typed.([> T.any ] t) ret
 
     (** {@markdown[
+        Integer `max`imum, signed or unsigned depending on `T`.
+
+         Allowed only on `uN`, `iN`, `usize`, and `isize`.
+         (Not on `bool` nor on `char`.)
+
+         Stabilized as [`u16::max`] and [`i64::max`] and similar.
+        ]} *)
+    val integer_max :
+      t:Types.ty ->
+      a:Typed.([< T.any ] t) ->
+      b:Typed.([< T.any ] t) ->
+      Typed.([> T.any ] t) ret
+
+    (** {@markdown[
+        Integer `min`imum, signed or unsigned depending on `T`.
+
+         Allowed only on `uN`, `iN`, `usize`, and `isize`.
+         (Not on `bool` nor on `char`.)
+
+         Stabilized as [`u16::min`] and [`i64::min`] and similar.
+        ]} *)
+    val integer_min :
+      t:Types.ty ->
+      a:Typed.([< T.any ] t) ->
+      b:Typed.([< T.any ] t) ->
+      Typed.([> T.any ] t) ret
+
+    (** {@markdown[
         Returns whether the argument's value is statically known at
          compile-time.
 
@@ -1509,100 +1465,28 @@ module M (StateM : State.StateM.S) = struct
       t:Types.ty -> arg:Typed.([< T.any ] t) -> Typed.([> T.sbool ] t) ret
 
     (** {@markdown[
-        Returns the base 10 logarithm of an `f128`.
+        Returns the natural logarithm of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f128::log10`](../../std/primitive.f128.html#method.log10)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `ln` method. For example, [`f32::ln`](../../std/primitive.f32.html#method.ln).
         ]} *)
-    val log10f128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val log : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
-        Returns the base 10 logarithm of an `f16`.
+        Returns the base 10 logarithm of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f16::log10`](../../std/primitive.f16.html#method.log10)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `log10` method. For example, [`f32::log10`](../../std/primitive.f32.html#method.log10).
         ]} *)
-    val log10f16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val log10 : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
-        Returns the base 10 logarithm of an `f32`.
+        Returns the base 2 logarithm of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f32::log10`](../../std/primitive.f32.html#method.log10)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `log2` method. For example, [`f32::log2`](../../std/primitive.f32.html#method.log2).
         ]} *)
-    val log10f32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the base 10 logarithm of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::log10`](../../std/primitive.f64.html#method.log10)
-        ]} *)
-    val log10f64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the base 2 logarithm of an `f128`.
-
-         The stabilized version of this intrinsic is
-         [`f128::log2`](../../std/primitive.f128.html#method.log2)
-        ]} *)
-    val log2f128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the base 2 logarithm of an `f16`.
-
-         The stabilized version of this intrinsic is
-         [`f16::log2`](../../std/primitive.f16.html#method.log2)
-        ]} *)
-    val log2f16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the base 2 logarithm of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::log2`](../../std/primitive.f32.html#method.log2)
-        ]} *)
-    val log2f32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the base 2 logarithm of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::log2`](../../std/primitive.f64.html#method.log2)
-        ]} *)
-    val log2f64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the natural logarithm of an `f128`.
-
-         The stabilized version of this intrinsic is
-         [`f128::ln`](../../std/primitive.f128.html#method.ln)
-        ]} *)
-    val logf128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the natural logarithm of an `f16`.
-
-         The stabilized version of this intrinsic is
-         [`f16::ln`](../../std/primitive.f16.html#method.ln)
-        ]} *)
-    val logf16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the natural logarithm of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::ln`](../../std/primitive.f32.html#method.ln)
-        ]} *)
-    val logf32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the natural logarithm of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::ln`](../../std/primitive.f64.html#method.ln)
-        ]} *)
-    val logf64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val log2 : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
         Returns the maximum of two `f128` values, ignoring NaN.
@@ -1974,13 +1858,15 @@ module M (StateM : State.StateM.S) = struct
          - `f`: The kernel function to offload.
          - `workgroup_dim`: A 3D size specifying the number of workgroups to launch.
          - `thread_dim`: A 3D size specifying the number of threads per workgroup.
+         - `dyn_cache`: The amount of dynamic shared memory to request for the kernel.
+         - `device_id`: The device to offload to. Use `-1` to select the default device.
          - `args`: A tuple of arguments forwarded to `f`.
 
          Example usage (pseudocode):
 
          ```rust,ignore (pseudocode)
          fn kernel(x: *mut [f64; 128]) {
-             core::intrinsics::offload(kernel_1, [256, 1, 1], [32, 1, 1], (x,))
+             core::intrinsics::offload(kernel_1, [256, 1, 1], [32, 1, 1], 0, -1, (x,))
          }
 
          #[cfg(target_os = "linux")]
@@ -2006,8 +1892,19 @@ module M (StateM : State.StateM.S) = struct
       workgroup_dim:Typed.([< T.tuple ] t) ->
       thread_dim:Typed.([< T.tuple ] t) ->
       dyn_cache:Typed.([< T.sint ] t) ->
+      device_id:Typed.([< T.sint ] t) ->
       args:Typed.([< T.any ] t) ->
       Typed.([> T.any ] t) ret
+
+    (** {@markdown[
+        Returns the number of offload devices available on the system.
+
+         Use this to discover which `device_id` values are valid to pass to
+         [`offload`]. Devices are numbered from `0` to the returned value minus one.
+
+         Returns `0` if no offloading devices are present.
+        ]} *)
+    val offload_get_num_devices : unit -> Typed.([> T.sint ] t) ret
 
     (** {@markdown[
         Calculates the offset from a pointer.
@@ -3610,36 +3507,12 @@ module M (StateM : State.StateM.S) = struct
       Typed.([> T.any ] t) ret
 
     (** {@markdown[
-        Returns the sine of an `f128`.
+        Returns the sine of a floating-point value.
 
-         The stabilized version of this intrinsic is
-         [`f128::sin`](../../std/primitive.f128.html#method.sin)
+         The stabilized versions of this intrinsic are available on the float primitives via the
+         `sin` method. For example, [`f32::sin`](../../std/primitive.f32.html#method.sin).
         ]} *)
-    val sinf128 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the sine of an `f16`.
-
-         The stabilized version of this intrinsic is
-         [`f16::sin`](../../std/primitive.f16.html#method.sin)
-        ]} *)
-    val sinf16 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the sine of an `f32`.
-
-         The stabilized version of this intrinsic is
-         [`f32::sin`](../../std/primitive.f32.html#method.sin)
-        ]} *)
-    val sinf32 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
-
-    (** {@markdown[
-        Returns the sine of an `f64`.
-
-         The stabilized version of this intrinsic is
-         [`f64::sin`](../../std/primitive.f64.html#method.sin)
-        ]} *)
-    val sinf64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
+    val sin : t:Types.ty -> x:Typed.([< T.any ] t) -> Typed.([> T.any ] t) ret
 
     (** {@markdown[
         The size of a type in bytes.
@@ -4202,6 +4075,22 @@ module M (StateM : State.StateM.S) = struct
     val truncf64 : x:Typed.([< T.sfloat ] t) -> Typed.([> T.sfloat ] t) ret
 
     (** {@markdown[
+        Gets the length of the array represented by this `TypeId`.
+
+         The more user-friendly version of this intrinsic is [`core::any::TypeId::array_len`].
+        ]} *)
+    val type_id_array_len :
+      id:Typed.([< T.tuple ] t) -> Typed.([> T.sint ] t) ret
+
+    (** {@markdown[
+        Gets the type of each element of the array or slice represented by this `TypeId`.
+
+         The more user-friendly version of this intrinsic is [`core::any::TypeId::element_ty`].
+        ]} *)
+    val type_id_element_ty :
+      id:Typed.([< T.tuple ] t) -> Typed.([> T.enum ] t) ret
+
+    (** {@markdown[
         Tests (at compile-time) if two [`crate::any::TypeId`] instances identify the
          same type. This is necessary because at const-eval time the actual discriminating
          data is opaque and cannot be inspected directly.
@@ -4237,6 +4126,15 @@ module M (StateM : State.StateM.S) = struct
       Typed.([> T.sint ] t) ret
 
     (** {@markdown[
+        Given a `TypeId` that represents a function pointer returns an [`core::mem::type_info::FnPtr`].
+         When called on something else this returns `None`.
+
+         The more user-friendly version of this intrinsic is [`core::any::TypeId::function_ptr`].
+        ]} *)
+    val type_id_function_ptr :
+      type_id:Typed.([< T.tuple ] t) -> Typed.([> T.enum ] t) ret
+
+    (** {@markdown[
         Returns the list of generic args on this type.
          Only meaningful for Adts, closures, ... Everything else returns an empty slice.
         ]} *)
@@ -4250,6 +4148,24 @@ module M (StateM : State.StateM.S) = struct
         ]} *)
     val type_id_is_signed :
       id:Typed.([< T.tuple ] t) -> Typed.([> T.sbool ] t) ret
+
+    (** {@markdown[
+        Given a `TypeId` that represents a pointer returns whether that pointer is mutable.
+         When called on anything else this returns `false`.
+
+         The more user-friendly version of this intrinsic is [`core::any::TypeId::points_mutably`].
+        ]} *)
+    val type_id_points_mutably :
+      id:Typed.([< T.tuple ] t) -> Typed.([> T.sbool ] t) ret
+
+    (** {@markdown[
+        Given a `TypeId` that represents a pointer this returns the `TypeId` which that pointer
+         points to. When called on anything else this returns None.
+
+         The more user-friendly version of this intrinsic is [`core::any::TypeId::points_to`].
+        ]} *)
+    val type_id_points_to :
+      id:Typed.([< T.tuple ] t) -> Typed.([> T.enum ] t) ret
 
     (** {@markdown[
         Gets the number of variants of the type represented by this `TypeId`.
@@ -4570,6 +4486,32 @@ module M (StateM : State.StateM.S) = struct
          The to-be-stabilized version of this intrinsic is [`crate::mem::variant_count`].
         ]} *)
     val variant_count : t:Types.ty -> Typed.([> T.sint ] t) ret
+
+    (** {@markdown[
+        Gets the name of the variant represented by the base `TypeId` and variant_idx.
+
+         The more user-friendly version of this intrinsic is [`core::mem::type_info::VariantId::name`].
+
+         [`TypeId`]: crate::any::TypeId
+        ]} *)
+    val variant_name :
+      base:Typed.([< T.tuple ] t) ->
+      variant_index:Typed.([< T.sint ] t) ->
+      Typed.([> T.sptr_f ] t) ret
+
+    (** {@markdown[
+        Returns true when the variant represented by the base `TypeId` and variant_idx is non
+         exhaustive.
+
+         The more user-friendly version of this intrinsic is
+         [`core::mem::type_info::VariantId::non_exhaustive`].
+
+         [`TypeId`]: crate::any::TypeId
+        ]} *)
+    val variant_non_exhaustive :
+      base:Typed.([< T.tuple ] t) ->
+      variant:Typed.([< T.sint ] t) ->
+      Typed.([> T.sbool ] t) ret
 
     (** {@markdown[
         Equivalent to the appropriate `llvm.memmove.p0i8.0i8.*` intrinsic, with

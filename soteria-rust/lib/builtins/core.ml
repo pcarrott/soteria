@@ -73,7 +73,8 @@ module M (StateM : State.StateM.S) = struct
           let* () = assert_not (r ==@ BV.mki_lit ty 0) `DivisionByZero in
           if signed then
             (* overflow on rem/div is UB even when wrapping *)
-            let min = Layout.min_value_z ty in
+            let ity = TypesUtils.scalar_as_integer ty in
+            let min = Layout.min_value_z ity in
             let min = BV.mk_lit ty min in
             let m_one = BV.mki_lit ty (-1) in
             assert_ (not (l ==@ min &&@ (r ==@ m_one))) `Overflow
@@ -228,7 +229,7 @@ module M (StateM : State.StateM.S) = struct
     Compo_res.is_ok res
 
   let parse_string ptr =
-    let+ str_data = State.load ptr (TSlice u8_ty) in
+    let+ str_data = State.load ptr (TSlice (u8_ty, None)) in
     Typed.Adt.as_array @@ Typed.cast_array str_data
     |> Monad.OptionM.map_m
          (module Iarray)

@@ -14,14 +14,13 @@ end)
 let successors_of (k : UllbcAst.terminator_kind) : UllbcAst.BlockId.id list =
   match k with
   | Goto t -> [ t ]
-  | Switch (_, If (b1, b2)) -> [ b1; b2 ]
-  | Switch (_, SwitchInt (_, cases, otherwise)) ->
-      otherwise :: List.map snd cases
+  | Switch (_, targets) -> targets
   | Call (_, t, u) -> [ t; u ]
   | Drop (_, _, _, t, u) -> [ t; u ]
   | TAssert (_, t, u) -> [ t; u ]
-  | InlineAsm (_, ts, u) -> u :: ts
-  | Abort _ | Return | UnwindResume -> []
+  | InlineAsm (_, ft, ts, u) -> (u :: Option.to_list ft) @ ts
+  | Panic (_, u) -> [ u ]
+  | UnwindTerminate | UndefinedBehavior | Return | UnwindResume -> []
 
 let entry_block = UllbcAst.BlockId.(to_int zero)
 
@@ -233,16 +232,14 @@ module Make (Dir : Direction) (Dom : Domain.S) = struct
      and scheduling the callee so [decl] is revisited when it grows. *)
   let call_summary st (decl : fun_decl) (c : call) : Dom.t =
     match c.func with
-    | FnOpRegular { kind = FunId (FRegular callee); _ } ->
+    | FnOpRegular { kind = Fun callee; _ } ->
         Fn_tbl.replace st.callers callee
           (decl.def_id
           :: Option.value ~default:[] (Fn_tbl.find_opt st.callers callee));
         ensure st callee;
         current st callee
-    | FnOpRegular { kind = FunId (FBuiltin _); _ }
-    | FnOpRegular { kind = TraitMethod _; _ }
-    | FnOpDynamic _ ->
-        (* Dynamic calls, method calls, builtins: not descended into. *)
+    | FnOpRegular { kind = TraitMethod _; _ } | FnOpDynamic _ ->
+        (* Dynamic calls, method calls: not descended into. *)
         Dom.opaque decl
 
   (* Re-analyse one function; if its summary grew, re-enqueue its callers. *)

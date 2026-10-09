@@ -71,7 +71,7 @@ val t_ptr : unit -> [> T.sptr ] ty
 
 val t_float : Types.float_type -> T.sfloat ty
 val t_usize : unit -> [> T.sint ] ty
-val t_lit : Types.literal_type -> [> T.sint ] ty
+val t_lit : Types.scalar_type -> [> T.sint ] ty
 val t_ptr_f : unit -> [> T.sptr_f ] ty
 val t_ptr_t : unit -> [> T.sptr_t ] ty
 val t_enum : Types.type_decl_ref -> [> T.enum ] ty
@@ -85,7 +85,7 @@ val cast_checked : ty:([< T.any ] as 'a) ty -> _ t -> 'a t
 val cast_float : _ t -> [> T.sfloat ] t
 val cast_i : Values.u_int_ty -> _ t -> [> T.sint ] t
 val cast_f : Types.float_type -> _ t -> T.sfloat t
-val cast_lit : Types.literal_type -> _ t -> [> T.sint ] t
+val cast_lit : Types.scalar_type -> _ t -> [> T.sint ] t
 val cast_ptr_f : _ t -> [< T.sptr_f ] t
 val cast_ptr_t : _ t -> [< T.sptr_t ] t
 val cast_tuple : _ t -> [> T.tuple ] t
@@ -107,10 +107,9 @@ module BitVec : sig
   (* constructors *)
 
   val of_bool : sbool t -> [> T.sint ] t
-  val of_literal : Values.literal -> [> T.sint ] t
   val of_constant_expr : Types.constant_expr -> [> T.sint ] t
   val of_constant_expr_opt : Types.constant_expr -> [> T.sint ] t option
-  val of_scalar : Values.scalar_value -> [> T.sint ] t
+  val of_scalar : Values.integer_value -> [> T.sint ] t
 
   (** Reads a bit-vector's contents as an integer of the given Rust type, which
       supplies both the signedness and the width. *)
@@ -118,8 +117,8 @@ module BitVec : sig
 
   (* from Z/int *)
 
-  val mk_lit : Types.literal_type -> Z.t -> [> T.sint ] t
-  val mki_lit : Types.literal_type -> int -> [> T.sint ] t
+  val mk_lit : Types.scalar_type -> Z.t -> [> T.sint ] t
+  val mki_lit : Types.scalar_type -> int -> [> T.sint ] t
   val u8i : int -> [> T.sint ] t
   val u32i : int -> [> T.sint ] t
   val u64 : Z.t -> [> T.sint ] t

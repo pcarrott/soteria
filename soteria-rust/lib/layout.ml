@@ -87,11 +87,11 @@ and resolve_trait_ty (tref : Types.trait_ref) assoc_ty_id args =
             st_substitute_visitor#visit_trait_assoc_ty_impl trait_assoc_ty)
       in
       trait_assoc_ty.value
-  | BuiltinOrAuto (BuiltinPointee, _, _) -> (
+  | BuiltinOrAuto (BuiltinPointee, _, _, _) -> (
       let pointee = List.hd tref.trait_decl_ref.binder_value.generics.types in
       match dst_kind pointee with
       | NoneKind -> TypesUtils.mk_unit_ty
-      | LenKind -> TLiteral (TUInt Usize)
+      | LenKind -> TScalar (TInteger (Unsigned Usize))
       | VTableKind ->
           let adt = Crate.get_adt_lang_item RustcLangItemDynMetadata in
           let generics = TypesUtils.mk_generic_args_from_types [ pointee ] in
@@ -101,7 +101,7 @@ and resolve_trait_ty (tref : Types.trait_ref) assoc_ty_id args =
 (** If this is a DST type with a slice tail, return the type of the slice's
     element. Errors otherwise. *)
 let rec dst_slice_ty : Types.ty -> Types.ty = function
-  | TSlice sub_ty -> sub_ty
+  | TSlice (sub_ty, _) -> sub_ty
   | TAdt adt when Crate.is_struct adt -> (
       match List.last_opt (Crate.as_struct adt) with
       | None -> L.failwith "dst_slice_ty: unexpected type"
@@ -111,7 +111,7 @@ let rec dst_slice_ty : Types.ty -> Types.ty = function
 (** Returns the resulting type obtained when indexing into the given type. Only
     valid for arrays and slices. *)
 let index_ty : Types.ty -> Types.ty = function
-  | TSlice ty | TArray (ty, _) -> ty
+  | TSlice (ty, _) | TArray (ty, _, _) -> ty
   | ty -> L.failwith "slice_ty: unexpected type: %a" pp_ty ty
 
 (** If this is a dynamically sized type (requiring a fat pointer). Requires the
@@ -124,6 +124,24 @@ let[@inline] size_to_fit ~size ~align =
     size
     (size +!!@ align -!!@ (size %@ align))
 
+(** Whether Charon chose all the offsets of the given layout; for now, we do not
+    evaluate guaranteed or partially known layouts. *)
+let layout_is_chosen (layout : Types.layout) =
+  let rec discr_is_chosen : Types.discriminator -> bool = function
+    | Known _ | Invalid -> true
+    | Branch (offset, _, children, fallback) ->
+        Option.is_some offset.chosen
+        && List.for_all (fun (_, d) -> discr_is_chosen d) children
+        && discr_is_chosen fallback
+  in
+  Option.for_all discr_is_chosen layout.discriminator
+  && layout.variant_layouts
+     |> List.for_all
+        @@ Option.for_all (fun v ->
+            v.Types.field_offsets
+            |> List.for_all @@ fun (ofs : Types.offset_expr) ->
+               Option.is_some ofs.chosen)
+
 (** The alignment a field of alignment [align] has within a value of type [ty]:
     [repr(packed(n))] caps the alignment of every field to [n]. *)
 let packed_align (ty : Types.ty) align =
@@ -135,7 +153,7 @@ let packed_align (ty : Types.ty) align =
       | _ -> align)
   | _ -> align
 
-let mk ~size ~align ?(uninhabited = false)
+let mk ~size ~align ?(uninhabited = Typed.v_false)
     ?(fields : Fields_shape.t = Primitive) () =
   { size; align; uninhabited; fields }
 
@@ -150,23 +168,19 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
   Session.get_or_compute_cached_layout ty @@ fun () ->
   match ty with
   (* Literals *)
-  | TLiteral ty ->
+  | TScalar ty ->
       let size = size_of_literal_ty ty in
       let align = align_of_literal_ty ty in
       ok (mk_concrete ~size ~align ())
   (* Fat pointers *)
-  | TAdt { generics = { types = [ sub_ty ]; _ }; builtin = Some TBox; _ }
-  | TRef (_, sub_ty, _)
-  | TRawPtr (sub_ty, _)
-    when is_dst sub_ty ->
+  | (TRef (_, sub_ty, _) | TRawPtr (sub_ty, _)) when is_dst sub_ty ->
       let ptr_size = Crate.pointer_size () in
       ok
         (mk_concrete ~size:(ptr_size * 2) ~align:ptr_size
            ~fields:(Array { stride = BV.usizei ptr_size; is_ptr = true })
            ())
-  (* Refs, pointers, boxes, function pointers *)
-  | TAdt { builtin = Some TBox; _ } | TRef (_, _, _) | TRawPtr (_, _) | TFnPtr _
-    ->
+  (* Refs, pointers, function pointers *)
+  | TRef (_, _, _) | TRawPtr (_, _) | TFnPtr _ ->
       let ptr_size = Crate.pointer_size () in
       ok (mk_concrete ~size:ptr_size ~align:ptr_size ())
   (* Dynamically sized types -- we assume they have a size of 0. In truth, these
@@ -175,8 +189,7 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
      layout, to get e.g. the offset of the tail in a DST struct. FIXME: Maybe we
      should mark the layout as a DST, and ensure a DST layout's size is never
      used for an allocation. *)
-  | TSlice _ ->
-      let sub_ty = match ty with TSlice ty -> ty | _ -> TLiteral (TUInt U8) in
+  | TSlice (sub_ty, _) ->
       let++ sub_layout = layout_of sub_ty in
       mk ~size:(BV.usizei 0) ~align:sub_layout.align
         ~fields:(Array { stride = sub_layout.size; is_ptr = false })
@@ -192,7 +205,7 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
          fields don't. To avoid this, we *never* consider layouts of generic
          types, even if one is provided. This avoids inconsistent layouts. *)
       | [ (_triple, layout) ], _
-        when (not (Config.get ()).polymorphic) || ty_is_monomorphic ty ->
+        when (not (Config.get ()).polymorphic) && layout_is_chosen layout ->
           translate_layout adt.kind ty layout
       | _ :: _ :: _, _ -> L.failwith "multiple layouts for the same ADT"
       | _, Struct fields -> compute_arbitrary_layout ty (field_tys fields)
@@ -200,7 +213,7 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
       | _, Enum variants -> compute_enum_layout ty variants
       | _, (Opaque | TDeclError _ | Alias _) -> not_impl_layout "unexpected" ty)
   (* Arrays *)
-  | TArray (subty, size) ->
+  | TArray (subty, size, _) ->
       let max_array_len sub_size =
         (* We calculate the max array size for a 32bit architecture, like Miri
            does. *)
@@ -222,7 +235,9 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
         ()
   (* Never -- zero sized type *)
   | TNever ->
-      ok (mk_concrete ~size:0 ~align:1 ~uninhabited:true ~fields:Primitive ())
+      ok
+        (mk_concrete ~size:0 ~align:1 ~uninhabited:Typed.v_true
+           ~fields:Primitive ())
   (* Function definitions -- zero sized type *)
   | TFnDef _ -> ok (mk_concrete ~size:0 ~align:1 ~fields:Primitive ())
   (* Pattern types -- just their content, we assume they're primitives *)
@@ -253,6 +268,7 @@ and translate_discriminator : Types.discriminator -> Fields_shape.discriminator
   | Known v -> Known v
   | Invalid -> Invalid
   | Branch (offset, int_ty, children, fallback) ->
+      let offset = Option.get ~msg:"discriminator: unknown ofs" offset.chosen in
       let offset = BV.usizei offset in
       let children =
         List.map
@@ -264,10 +280,32 @@ and translate_discriminator : Types.discriminator -> Fields_shape.discriminator
       let fallback = translate_discriminator fallback in
       Branch { offset; tag_ty; children; fallback }
 
+(** Evaluates an inhabitedness predicate; predicates that can't be decided are
+    considered inhabited. *)
+and is_inhabited : Types.inhabited_predicate -> _ = function
+  | InhabitedPredicateTrue -> ok Typed.v_true
+  | InhabitedPredicateFalse -> ok Typed.v_false
+  | InhabitedPredicateAnd preds ->
+      Result.fold_list preds ~init:Typed.v_true ~f:(fun acc pred ->
+          let++ pred = is_inhabited pred in
+          acc &&@ pred)
+  | InhabitedPredicateOr preds ->
+      Result.fold_list preds ~init:Typed.v_false ~f:(fun acc pred ->
+          let++ pred = is_inhabited pred in
+          acc ||@ pred)
+  | InhabitedPredicateConstIsZero { kind = CInteger v; _ } ->
+      ok (BV.of_scalar v ==@ Usize.(0s))
+  | InhabitedPredicateConstIsZero c ->
+      not_impl "inhabited predicate: %a == 0" Crate.pp_constant_expr c
+  | InhabitedPredicateGenericType ty ->
+      let++ layout = layout_of ty in
+      Typed.not layout.uninhabited
+
 and translate_layout adt_kind ty (layout : Types.layout) =
   let size = compute_size ty layout.size in
   let align = compute_align ty layout.align in
-  let uninhabited = layout.uninhabited in
+  let** inhabited = is_inhabited layout.inhabited in
+  let uninhabited = Typed.not inhabited in
   let discriminator = Option.map translate_discriminator layout.discriminator in
   let variant_layouts =
     List.map
@@ -275,7 +313,12 @@ and translate_layout adt_kind ty (layout : Types.layout) =
         match (v_opt : Types.variant_layout option) with
         | None -> (None, Primitive)
         | Some v ->
-            let ofs = Array.of_list (List.map BV.usizei v.field_offsets) in
+            let ofs =
+              v.field_offsets
+              |> List.map (fun (ofs : Types.offset_expr) ->
+                  Option.get ~msg:"layout: unknown ofs" ofs.chosen |> BV.usizei)
+              |> Array.of_list
+            in
             let tagger =
               match v.tagger with
               | [] -> None
@@ -305,16 +348,17 @@ and translate_layout adt_kind ty (layout : Types.layout) =
   ok layout
 
 and compute_size ty size =
-  match size with
-  | Some s -> BV.usizei s
-  | None ->
+  match size.chosen with
+  | Some (SizeExprConstant { kind = CInteger s; _ }) -> BV.usize (z_of_scalar s)
+  | _ ->
       layout_warning "Inferred size=0" ty;
       BV.usizei 0
 
 and compute_align ty align =
-  match align with
-  | Some a -> BV.usizeinz a
-  | None ->
+  match align.chosen with
+  | Some (SizeExprConstant { kind = CInteger a; _ }) ->
+      BV.usizenz (z_of_scalar a)
+  | _ ->
       layout_warning "Inferred align=1" ty;
       BV.usizeinz 1
 
@@ -332,13 +376,13 @@ and compute_arbitrary_layout ?fst_size ?fst_align ty members =
         let new_size, ovf = offset +$?@ layout.size in
         let new_align = BV.max ~signed:false layout.align curr_align in
         aux (offset :: offsets) new_size new_align (ovf ||@ overflowed)
-          (uninhabited || layout.uninhabited)
+          (uninhabited ||@ layout.uninhabited)
           rest
   in
   let fst_size = Option.value fst_size ~default:(BV.usizei 0) in
   let fst_align = Option.value fst_align ~default:(BV.usizeinz 1) in
   let** offsets, size, align, overflowed, uninhabited =
-    aux [] fst_size fst_align Typed.v_false false members
+    aux [] fst_size fst_align Typed.v_false Typed.v_false members
   in
   let++ () = assert_or_error (Typed.not overflowed) (`InvalidLayout ty) in
   let size = size_to_fit ~size ~align in
@@ -353,18 +397,20 @@ and compute_enum_layout ty (variants : Types.variant list) =
   (* no variants: uninhabited ZST *)
   | [] ->
       layout_warning "Computed an enum layout (ZST)" ty;
-      ok (mk_concrete ~size:0 ~align:1 ~uninhabited:true ~fields:Primitive ())
+      ok
+        (mk_concrete ~size:0 ~align:1 ~uninhabited:Typed.v_true
+           ~fields:Primitive ())
   (* N variants: we assume a tagged variant *)
   | _ :: _ ->
       let tags =
         List.map
-          (fun (v : Types.variant) -> BV.of_literal v.discriminant)
+          (fun (v : Types.variant) -> BV.of_scalar v.discriminant)
           variants
       in
       let tag_ty =
         match variants with
-        | [] -> Values.TInt I32 (* Shouldn't matter *)
-        | v :: _ -> lit_ty_of_lit v.discriminant
+        | [] -> Values.TInteger (Signed I32) (* Shouldn't matter *)
+        | v :: _ -> lit_of_scalar v.discriminant
       in
       let discriminator : Fields_shape.discriminator =
         (* best effort: we assume direct encoding *)
@@ -378,23 +424,24 @@ and compute_enum_layout ty (variants : Types.variant list) =
         let offset = Usize.(0s) in
         Branch { offset; tag_ty; children; fallback = Invalid }
       in
-      let** tag = layout_of (TLiteral tag_ty) in
+      let** tag = layout_of (TScalar tag_ty) in
       let++ size, align, variants, uninhabited =
         Result.fold_list variants
-          ~init:(Usize.(0s), Usize.(1s), [], true)
+          ~init:(Usize.(0s), Usize.(1s), [], Typed.v_true)
           ~f:(fun (size, align, variants, uninhabited) v ->
-            let++ l =
+            let** l =
               compute_arbitrary_layout ty ~fst_size:tag.size
                 ~fst_align:tag.align (field_tys v.fields)
             in
-            let tagger =
-              if l.uninhabited then None
-              else Some (BV.usizei 0, Types.VariantId.nth tags v.id)
+            let+ tagger =
+              if%sat l.uninhabited then return None
+              else return (Some (BV.usizei 0, Types.VariantId.nth tags v.id))
             in
-            ( BV.max ~signed:false size l.size,
-              BV.max ~signed:false align l.align,
-              (tagger, l.fields) :: variants,
-              uninhabited && l.uninhabited ))
+            Ok
+              ( BV.max ~signed:false size l.size,
+                BV.max ~signed:false align l.align,
+                (tagger, l.fields) :: variants,
+                uninhabited &&@ l.uninhabited ))
       in
       let variants = List.rev variants in
       let layout =
@@ -434,6 +481,26 @@ let[@inline] align_of ty =
   let++ { align; _ } = layout_of ty in
   (Typed.cast align :> Typed.([> T.nonzero ] t))
 
+(** The byte offset of [field] within the vtable of the [dyn Trait] predicate
+    [dyn_pred]. *)
+let vtable_field_offset (dyn_pred : Types.dyn_predicate)
+    (field : Types.v_table_field) =
+  match Crate.dyn_vtable_ref dyn_pred with
+  | None ->
+      (* Obol doesn't declare VTable structs, using instead the rustc hardcoded
+         layout. *)
+      let idx =
+        match field with
+        | VTableSize -> 1
+        | VTableAlign -> 2
+        | _ -> L.failwith "vtable_field_offset: unexpected field"
+      in
+      ok (BV.usizei (idx * Crate.pointer_size ()))
+  | Some vt_ref ->
+      let idx = Crate.vtable_field_index vt_ref field in
+      let++ { fields; _ } = layout_of (TAdt vt_ref) in
+      Fields_shape.offset_of idx fields
+
 (** Whether the given type is a 1ZST: it must have size 0 and alignment 1. *)
 let[@inline] is_1zst ty =
   let++ layout = layout_of ty in
@@ -453,44 +520,50 @@ let enum_single_variant (ty : Types.ty) =
   | Enum _ -> None
   | _ -> L.failwith "enum_single_variant: not an enum type: %a" pp_ty ty
 
-let min_value_z : Types.literal_type -> Z.t = function
-  | TUInt _ -> Z.zero
-  | TInt Isize -> Z.neg (Z.shift_left Z.one ((8 * Crate.pointer_size ()) - 1))
-  | TInt I128 -> Z.neg (Z.shift_left Z.one 127)
-  | TInt I64 -> Z.neg (Z.shift_left Z.one 63)
-  | TInt I32 -> Z.neg (Z.shift_left Z.one 31)
-  | TInt I16 -> Z.neg (Z.shift_left Z.one 15)
-  | TInt I8 -> Z.neg (Z.shift_left Z.one 7)
-  | _ -> L.failwith "Invalid integer type for min_value_z"
+let min_value_z : Types.integer_type -> Z.t = function
+  | Unsigned _ -> Z.zero
+  | Signed Isize -> Z.neg (Z.shift_left Z.one ((8 * Crate.pointer_size ()) - 1))
+  | Signed I128 -> Z.neg (Z.shift_left Z.one 127)
+  | Signed I64 -> Z.neg (Z.shift_left Z.one 63)
+  | Signed I32 -> Z.neg (Z.shift_left Z.one 31)
+  | Signed I16 -> Z.neg (Z.shift_left Z.one 15)
+  | Signed I8 -> Z.neg (Z.shift_left Z.one 7)
 
-let max_value_z : Types.literal_type -> Z.t = function
-  | TUInt U128 -> Z.pred (Z.shift_left Z.one 128)
-  | TUInt U64 -> Z.pred (Z.shift_left Z.one 64)
-  | TUInt U32 -> Z.pred (Z.shift_left Z.one 32)
-  | TUInt U16 -> Z.pred (Z.shift_left Z.one 16)
-  | TUInt U8 -> Z.pred (Z.shift_left Z.one 8)
-  | TUInt Usize -> Z.pred (Z.shift_left Z.one (8 * Crate.pointer_size ()))
-  | TInt I128 -> Z.pred (Z.shift_left Z.one 127)
-  | TInt I64 -> Z.pred (Z.shift_left Z.one 63)
-  | TInt I32 -> Z.pred (Z.shift_left Z.one 31)
-  | TInt I16 -> Z.pred (Z.shift_left Z.one 15)
-  | TInt I8 -> Z.pred (Z.shift_left Z.one 7)
-  | TInt Isize -> Z.pred (Z.shift_left Z.one ((8 * Crate.pointer_size ()) - 1))
-  | _ -> L.failwith "Invalid integer type for max_value_z"
+let max_value_z : Types.integer_type -> Z.t = function
+  | Unsigned U128 -> Z.pred (Z.shift_left Z.one 128)
+  | Unsigned U64 -> Z.pred (Z.shift_left Z.one 64)
+  | Unsigned U32 -> Z.pred (Z.shift_left Z.one 32)
+  | Unsigned U16 -> Z.pred (Z.shift_left Z.one 16)
+  | Unsigned U8 -> Z.pred (Z.shift_left Z.one 8)
+  | Unsigned Usize -> Z.pred (Z.shift_left Z.one (8 * Crate.pointer_size ()))
+  | Signed I128 -> Z.pred (Z.shift_left Z.one 127)
+  | Signed I64 -> Z.pred (Z.shift_left Z.one 63)
+  | Signed I32 -> Z.pred (Z.shift_left Z.one 31)
+  | Signed I16 -> Z.pred (Z.shift_left Z.one 15)
+  | Signed I8 -> Z.pred (Z.shift_left Z.one 7)
+  | Signed Isize ->
+      Z.pred (Z.shift_left Z.one ((8 * Crate.pointer_size ()) - 1))
 
-let rec is_unsafe_cell : Types.ty -> bool = function
+(** Whether the type implements [Freeze], i.e. has no interior mutability. *)
+let rec is_freeze : Types.ty -> bool = function
   | TAdt adt -> (
-      if adt_is_unsafe_cell adt then true
-      else
-        match (Crate.get_adt adt).kind with
-        | Struct fs | Union fs -> List.exists is_unsafe_cell (field_tys fs)
-        | Enum vs ->
-            Iter.exists is_unsafe_cell
-            @@ Iter.flat_map_l (fun (v : Types.variant) -> field_tys v.fields)
-            @@ Iter.of_list vs
-        | _ -> false)
-  | TArray (ty, _) | TSlice ty -> is_unsafe_cell ty
-  | _ -> false
+      let decl = Crate.get_adt adt in
+      match decl.marker_traits with
+      | Some { is_freeze; _ } -> is_freeze
+      (* Charon only knows the marker traits of monomorphic types *)
+      | None -> (
+          if adt_is_unsafe_cell adt then false
+          else
+            match decl.kind with
+            | Struct fs | Union fs -> List.for_all is_freeze (field_tys fs)
+            | Enum vs ->
+                Iter.for_all is_freeze
+                @@ Iter.flat_map_l (fun (v : Types.variant) ->
+                    field_tys v.fields)
+                @@ Iter.of_list vs
+            | _ -> true))
+  | TArray (ty, _, _) | TSlice (ty, _) -> is_freeze ty
+  | _ -> true
 
 (** [is_abi_compatible ty1 ty2] is true if a function expecting an argument of
     type [ty1] can be called with an argument of type [ty2].
@@ -501,7 +574,6 @@ let rec is_abi_compatible (ty1 : Types.ty) (ty2 : Types.ty) =
   let is_ptr_like : Types.ty -> bool = function
     | TRef _ | TRawPtr _ -> true
     | TAdt { builtin = Some TBox; _ } -> true
-    | TAdt adt -> adt_is_box adt
     | _ -> false
   in
   let is_repr_transparent (adt : Types.type_decl_ref) =
@@ -531,12 +603,12 @@ let rec is_abi_compatible (ty1 : Types.ty) (ty2 : Types.ty) =
   | (TRef (_, ty1, _) | TRawPtr (ty1, _)), (TRef (_, ty2, _) | TRawPtr (ty2, _))
     ->
       ok (Typed.of_bool (dst_kind ty1 = dst_kind ty2))
-  | TLiteral (TUInt uint1), TLiteral (TUInt uint2) ->
+  | TScalar (TInteger (Unsigned uint1)), TScalar (TInteger (Unsigned uint2)) ->
       ok (Typed.of_bool (size_of_uint_ty uint1 = size_of_uint_ty uint2))
-  | TLiteral (TInt int1), TLiteral (TInt int2) ->
+  | TScalar (TInteger (Signed int1)), TScalar (TInteger (Signed int2)) ->
       ok (Typed.of_bool (size_of_int_ty int1 = size_of_int_ty int2))
-  | TLiteral (TUInt U32), TLiteral TChar | TLiteral TChar, TLiteral (TUInt U32)
-    ->
+  | TScalar (TInteger (Unsigned U32)), TScalar TChar
+  | TScalar TChar, TScalar (TInteger (Unsigned U32)) ->
       ok Typed.v_true
   (* patterns: recurse *)
   | TPattern (inner1, _), ty2 -> is_abi_compatible inner1 ty2

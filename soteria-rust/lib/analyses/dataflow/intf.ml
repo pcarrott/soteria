@@ -34,7 +34,7 @@ module Domain = struct
     (** The live successors of [block]'s terminator: lets an analysis prune
         statically-dead branches (e.g. a [Switch] on a known guard).
         [fn]/[block] identify the point so it may consult auxiliary analyses.
-        The default is {!successors_of} (no pruning). *)
+        The default is [successors_of] (no pruning). *)
     val live_successors :
       fn:Types.FunDeclId.id ->
       block:int ->

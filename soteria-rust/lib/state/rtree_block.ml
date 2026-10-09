@@ -33,7 +33,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       let sub = Typed.Infix.( -!!@ )
 
       let is_in_bound (v : t) : sbool Typed.t =
-        let max = Layout.max_value_z (TInt Isize) in
+        let max = Layout.max_value_z (Signed Isize) in
         let max = Typed.BitVec.usize max in
         v <=@ max
 

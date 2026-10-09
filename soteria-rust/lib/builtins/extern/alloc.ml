@@ -59,7 +59,7 @@ module M (StateM : State.StateM.S) = struct
       | [ size; align ] -> (Typed.cast_i Usize size, align_of_enum align)
       | _ -> L.failwith "alloc: invalid arguments"
     in
-    let max_size = Layout.max_value_z (TInt Isize) in
+    let max_size = Layout.max_value_z (Signed Isize) in
     let max_size = Typed.BitVec.usize max_size in
     let* () =
       assert_ (Usize.(1s) <=@ align &&@ (size <=@ max_size)) `InvalidAlloc

@@ -296,32 +296,32 @@ Test our simple Kani demo works
   => Running demo::memory_leak...
   error: demo::memory_leak: found issues in <time>, errors in 1 branch (out of 1)
   warning: Memory leak in demo::memory_leak
-      --> $RUSTLIB/library/alloc/src/alloc.rs:130:9
-  130 |            __rust_alloc(layout.size(), layout.alignment())
+      --> $RUSTLIB/library/alloc/src/alloc.rs:131:9
+  131 |            __rust_alloc(layout.size(), layout.alignment())
       |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
       |            |
       |            Triggering operation
       |            8: Allocation
       .    
-  302 |                    let raw_ptr = if zeroed { alloc_zeroed(layout) } else { alloc(layout) };
+  308 |                    let raw_ptr = if zeroed { alloc_zeroed(layout) } else { alloc(layout) };
       |                                                                            ------------- 7: Call trace
       .    
-  423 |        const fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
-  424 | /          core::intrinsics::const_eval_select(
-  425 | |              (layout, zeroed),
-  426 | |              Global::alloc_impl_const,
-  427 | |              Global::alloc_impl_runtime,
-  428 | |          )
+  429 |        const fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
+  430 | /          core::intrinsics::const_eval_select(
+  431 | |              (layout, zeroed),
+  432 | |              Global::alloc_impl_const,
+  433 | |              Global::alloc_impl_runtime,
+  434 | |          )
       | \----------' 6: Call trace
-  429 |        }
+  435 |        }
       .    
-  541 |            self.alloc_impl(layout, false)
+  548 |            self.alloc_impl(layout, false)
       |            ------------------------------ 5: Call trace
-      --> $RUSTLIB/library/alloc/src/boxed.rs:290:19
+      --> $RUSTLIB/library/alloc/src/boxed.rs:292:19
   251 |        match Global.allocate(layout) {
       |              ----------------------- 4: Call trace
       .    
-  290 |            let ptr = box_new_uninit(<T as SizedTypeProperties>::LAYOUT) as *mut T;
+  292 |            let ptr = box_new_uninit(<T as SizedTypeProperties>::LAYOUT) as *mut T;
       |                      -------------------------------------------------- 3: Call trace
       --> $TESTCASE_ROOT/demo.rs:33:21
    32 |    fn memory_leak() {

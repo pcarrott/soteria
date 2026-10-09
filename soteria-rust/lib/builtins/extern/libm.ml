@@ -76,7 +76,7 @@ module M (StateM : State.StateM.S) = struct
     in
     if%sat any_nan args then ok (Typed.Float.nan fp)
     else
-      let* res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+      let* res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
       let res = Typed.cast_float res in
       let bound cmp = Option.map (fun l -> cmp res (Typed.Float.mk fp l)) in
       let+ () =
@@ -117,16 +117,19 @@ module M (StateM : State.StateM.S) = struct
       | _ -> L.failwith "lgamma_r: invalid arguments"
     in
     let* () = Core.floating_inaccuracy_warn () in
-    let* sign_val = Value_codec.nondet_valid (TLiteral (TInt I32)) in
+    let* sign_val =
+      Value_codec.nondet_valid (TScalar (TInteger (Signed I32)))
+    in
     let* () = assume [ sign_val ==@ U32.(1s) ||@ (sign_val ==@ U32.(-1s)) ] in
-    let* () = State.store sign (TLiteral (TInt I32)) sign_val in
+    let* () = State.store sign (TScalar (TInteger (Signed I32))) sign_val in
     over_approximate ~bounds:unbounded ~args:[ x ] x
 
   (** [ldexp(x, n) = x * 2^n]; exact whenever it doesn't over- or underflow. *)
   let ldexp args =
     let x, n =
       match args with
-      | [ x; n ] -> (Typed.cast_float x, Typed.cast_lit (TInt I32) n)
+      | [ x; n ] ->
+          (Typed.cast_float x, Typed.cast_lit (TInteger (Signed I32)) n)
       | _ -> L.failwith "ldexp: invalid arguments"
     in
     let* () = Core.floating_inaccuracy_warn () in

@@ -133,17 +133,17 @@ module Make (Borrows : Tree_borrows.T) = struct
       (* FIXME: this logic is tree borrows related and should be handled there.
          https://github.com/soteria-tools/soteria/issues/301 *)
       let state : Tree_borrows.state =
-        match (ty, Layout.is_unsafe_cell pointee) with
-        | TRef (_, _, RShared), false -> Frozen
-        | TRef (_, _, RShared), true -> Cell
-        | _, false -> Reserved false
-        | _, true -> ReservedIM
+        match (ty, Layout.is_freeze pointee) with
+        | TRef (_, _, RShared), true -> Frozen
+        | TRef (_, _, RShared), false -> Cell
+        | _, true -> Reserved false
+        | _, false -> ReservedIM
       in
       let protector : Tree_borrows.protector option =
         match (protect, ty) with
         | false, _ -> None
         | true, TRef _ -> Some Strong
-        | true, TAdt adt when adt_is_box adt -> Some Weak
+        | true, TAdt { builtin = Some TBox; _ } -> Some Weak
         | true, _ -> L.failwith "Non-ref or box in borrow?"
       in
       let** tag = with_borrow (Borrows.Tree.borrow ~state ?protector tag) in
@@ -371,12 +371,11 @@ module Make (Borrows : Tree_borrows.T) = struct
 
   let rec size_and_align_of_val t (ptr : Typed.([< T.sptr_f ] t)) =
     let* st = get_state () in
-    let load_vtable field ptr =
+    let load_vtable dyn_pred field ptr =
       let open Rustsymex.Syntax in
-      let usize : Types.ty = TLiteral (TUInt Usize) in
-      let** field_size = Layout.size_of usize in
-      let ofs = match field with `Size -> Usize.(1s) | `Align -> Usize.(2s) in
-      let** ptr' = Sptr.raw_offset ptr (ofs *!!@ field_size) in
+      let usize : Types.ty = TScalar (TInteger (Unsigned Usize)) in
+      let** ofs = Layout.vtable_field_offset dyn_pred field in
+      let** ptr' = Sptr.raw_offset ptr ofs in
       let ptr' = Typed.Ptr.of_ptr_t ptr' in
       let+ res, _ = load ~ignore_borrow:true ~check_refs:false ptr' usize st in
       Compo_res.map Typed.cast res
@@ -426,7 +425,7 @@ module Make (Borrows : Tree_borrows.T) = struct
   and check_non_dangling (ptr : Typed.([< T.sptr_f ] t)) (ty : Types.ty) =
     let*^ ty = Layout.normalise ty in
     let**^ layout = Layout.layout_of ty in
-    if layout.uninhabited then Result.error (`RefToUninhabited ty)
+    if%sat layout.uninhabited then Result.error (`RefToUninhabited ty)
     else
       let** size, _ = size_and_align_of_val ty ptr in
       check_non_dangling_untyped (Typed.Ptr.ptr_of ptr) size
@@ -626,8 +625,8 @@ module Make (Borrows : Tree_borrows.T) = struct
   module Sptr = struct
     include Sptr
 
-    let offset ?check_signed ?(ty = Types.TLiteral (TUInt U8)) off_by
-        (ptr : Typed.([< T.sptr_t ] t)) =
+    let offset ?check_signed ?(ty = Types.TScalar (TInteger (Unsigned U8)))
+        off_by (ptr : Typed.([< T.sptr_t ] t)) =
       [%l.debug
         "Executing Offset of pointer %a by %a" Typed.ppa ptr Typed.ppa off_by];
       let@ () = with_loc_err ~trace:"Pointer offset" () in
@@ -1026,7 +1025,7 @@ module Make (Borrows : Tree_borrows.T) = struct
     | None ->
         (* the identifier of a type is opaque; all we know is that distinct
            types have distinct identifiers. *)
-        let* id = nondet (Typed.t_lit (TUInt U128)) in
+        let* id = nondet (Typed.t_lit (TInteger (Unsigned U128))) in
         let distinct =
           Rustsymex.TypeMap.to_seq type_ids
           |> Seq.map snd

@@ -56,6 +56,6 @@ Test branching on nondet enums: we want to avoid branching unless necessary (whe
   
   => Running nondet_branching::one_branch_per_match...
   note: nondet_branching::one_branch_per_match: done in <time>, ran 2 branches
-  PC 1: V|1|.is<A>
-  PC 2: !(V|1|.is<A>)
+  PC 1: !(V|1|.is<A>)
+  PC 2: V|1|.is<A>
   

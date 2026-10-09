@@ -43,7 +43,7 @@ module Analysis = Analysis.Make_forward (struct
     match (env, s.kind) with
     | Env m, Assign ({ kind = PlaceLocal lid; _ }, op) -> (
         match op with
-        | Use (Constant { kind = CLiteral (VBool b); _ }, _) ->
+        | Use (Constant { kind = CBool b; _ }, _) ->
             Env (LocalId.Map.add lid b m)
         | Use (Copy { kind = PlaceLocal lid2; _ }, _retag) -> (
             (* Copying from another local: if we know the source local, we know
@@ -65,5 +65,5 @@ let eval_bool_at fn block (op : Expressions.operand) : bool option =
       match op with
       | Copy { kind = PlaceLocal lid; _ } | Move { kind = PlaceLocal lid; _ } ->
           LocalId.Map.find_opt lid m
-      | Constant { kind = CLiteral (VBool b); _ } -> Some b
+      | Constant { kind = CBool b; _ } -> Some b
       | _ -> None)
