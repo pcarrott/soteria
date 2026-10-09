@@ -192,6 +192,107 @@ Test transmutations keeping the bit-patterns the same
   note: transmute_roundtrip::two_way_u8x4_u16x2: done in <time>, ran 1 branch
   PC 1: empty
   
+Test built-in checks panic, while unchecked operations are UB
+  $ soteria-rust exec builtin_checks.rs
+  Compiling... done in <time>
+  => Running builtin_checks::index_out_of_bounds...
+  error: builtin_checks::index_out_of_bounds: found issues in <time>, errors in 1 branch (out of 3)
+  error: Panic: index out of bounds: the len is 0x0000000000000003 but the index is V|1| in builtin_checks::index_out_of_bounds
+      --> $TESTCASE_ROOT/builtin_checks.rs:5:13
+    2 |  fn index_out_of_bounds() {
+      |  ------------------------ 1: Entry point
+      .  
+    5 |      let _ = v[i];
+      |              ^^^^ Triggering operation
+  PC 1: (0x0000000000000003 <=u V|1|)
+  
+  => Running builtin_checks::get_unchecked_out_of_bounds...
+  error: builtin_checks::get_unchecked_out_of_bounds: found issues in <time>, errors in 1 branch (out of 4)
+  bug: Out of bounds in builtin_checks::get_unchecked_out_of_bounds
+      --> $RUSTLIB/library/core/src/slice/index.rs:232:18
+  232 |          unsafe { slice_get_unchecked(slice, self) }
+      |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Triggering operation
+      --> $RUSTLIB/library/core/src/slice/mod.rs:695:24
+  695 |          unsafe { &mut *index.get_unchecked_mut(self) }
+      |                         ----------------------------- 3: Call trace
+      --> $TESTCASE_ROOT/builtin_checks.rs:13:15
+    9 |  fn get_unchecked_out_of_bounds() {
+      |  -------------------------------- 1: Entry point
+      .  
+   13 |      unsafe { *s.get_unchecked_mut(i) = 0 };
+      |                ---------------------- 2: Call trace
+  PC 1: ((V|1| <s 0x0000000000000000) || (0x0000000000000003 <=s V|1|))
+  
+  => Running builtin_checks::add_overflow...
+  error: builtin_checks::add_overflow: found issues in <time>, errors in 1 branch (out of 2)
+  error: Panic: attempt to compute `V|1| + 0x01`, which would overflow in builtin_checks::add_overflow
+      --> $TESTCASE_ROOT/builtin_checks.rs:19:13
+   17 |  fn add_overflow() {
+      |  ----------------- 1: Entry point
+   18 |      let a: u8 = soteria::nondet_bytes();
+   19 |      let _ = a + 1;
+      |              ^^^^^ Triggering operation
+  PC 1: (V|1| == 0xff) /\ (V|1| == 0xff)
+  
+  => Running builtin_checks::div_by_zero...
+  error: builtin_checks::div_by_zero: found issues in <time>, errors in 1 branch (out of 2)
+  error: Panic: attempt to divide `V|1|` by zero in builtin_checks::div_by_zero
+      --> $TESTCASE_ROOT/builtin_checks.rs:26:13
+   23 |  fn div_by_zero() {
+      |  ---------------- 1: Entry point
+      .  
+   26 |      let _ = a / b;
+      |              ^^^^^ Triggering operation
+  PC 1: (0x00 == V|2|) /\ (0x00 == V|2|)
+  
+  => Running builtin_checks::neg_overflow...
+  error: builtin_checks::neg_overflow: found issues in <time>, errors in 1 branch (out of 2)
+  error: Panic: attempt to negate `V|1|`, which would overflow in builtin_checks::neg_overflow
+      --> $TESTCASE_ROOT/builtin_checks.rs:32:13
+   30 |  fn neg_overflow() {
+      |  ----------------- 1: Entry point
+   31 |      let a: i8 = soteria::nondet_bytes();
+   32 |      let _ = -a;
+      |              ^^ Triggering operation
+  PC 1: (V|1| == 0x80) /\ (V|1| == 0x80)
+  
+  => Running builtin_checks::failed_check_unwinds...
+  error: builtin_checks::failed_check_unwinds: found issues in <time>, errors in 2 branches (out of 2)
+  error: Panic: dropped in builtin_checks::failed_check_unwinds
+      --> $RUSTLIB/library/core/src/ptr/mod.rs:848:1
+  847 |      #[lang = "drop_glue"]
+  848 |      pub(crate) const unsafe fn drop_glue<T: PointeeSized>(_: &mut T)
+      | /----'
+      | | /--'
+  849 | | |  where
+  850 | | |      T: [const] Destruct,
+      | \-|  -----------------------' 3: Call trace
+      |   \-------------------------' 4: Call trace
+  851 |      {
+      --> $TESTCASE_ROOT/builtin_checks.rs:38:9
+   38 |              soteria::panic("dropped");
+      |              ^^^^^^^^^^^^^^^^^^^^^^^^^
+      |              |
+      |              Triggering operation
+      |              5: Call trace
+      .      
+   45 |      fn failed_check_unwinds() {
+      |      ------------------------- 1: Entry point
+      .      
+   49 |      }
+      |      - 2: Call trace
+  PC 1: (V|1| <=u 0xfe)
+  
+  bug: Terminated unwind in builtin_checks::failed_check_unwinds
+      --> $TESTCASE_ROOT/builtin_checks.rs:49:1
+   45 |  fn failed_check_unwinds() {
+      |  ------------------------- 1: Entry point
+      .  
+   49 |  }
+      |  ^ Triggering operation
+  PC 1: (V|1| == 0xff) /\ (V|1| == 0xff)
+  
+  [1]
 Test null and dangling pointers
   $ soteria-rust exec dangling_ptrs.rs
   Compiling... done in <time>
@@ -205,7 +306,7 @@ Test null and dangling pointers
   
   => Running dangling_ptrs::null_ptr_not_zst...
   error: dangling_ptrs::null_ptr_not_zst: found issues in <time>, errors in 1 branch (out of 1)
-  error: Null dereference in dangling_ptrs::null_ptr_not_zst
+  bug: Null dereference in dangling_ptrs::null_ptr_not_zst
       --> $TESTCASE_ROOT/dangling_ptrs.rs:63:30
    61 |  fn null_ptr_not_zst() {
       |  --------------------- 1: Entry point

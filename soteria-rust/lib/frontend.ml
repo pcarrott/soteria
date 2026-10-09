@@ -188,7 +188,6 @@ let default () =
          "--ullbc";
          "--extract-opaque-bodies";
          "--mir=elaborated";
-         "--reconstruct-fallible-operations";
          "--reconstruct-asserts";
          "--desugar-drops";
          "--precise-drops";

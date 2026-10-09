@@ -711,6 +711,42 @@ module Make (StateImpl : State.S) = struct
 
   and eval_operand_list = map_list ~f:eval_operand
 
+  and eval_assert_msg (kind : GAst.builtin_assert_kind) : Error.assert_msg t =
+    let eval_int op =
+      eval_operand op
+      |> map @@ Typed.cast_lit (TypesUtils.ty_as_literal (type_of_operand op))
+    in
+    match kind with
+    | BoundsCheck (len, index) ->
+        let* len = eval_int len in
+        let+ index = eval_int index in
+        Error.BoundsCheck { len; index }
+    | Overflow (op, l, r) ->
+        let* l = eval_int l in
+        let+ r = eval_int r in
+        Error.Overflow (op, l, r)
+    | OverflowNeg v ->
+        let+ v = eval_int v in
+        Error.OverflowNeg v
+    | DivisionByZero v ->
+        let+ v = eval_int v in
+        Error.DivisionByZero v
+    | RemainderByZero v ->
+        let+ v = eval_int v in
+        Error.RemainderByZero v
+    | MisalignedPointerDereference (required, found) ->
+        let* required = eval_int required in
+        let+ found = eval_int found in
+        Error.MisalignedPointerDereference { required; found }
+    | NullPointerDereference -> ok Error.NullPointerDereference
+    | NullReferenceCreated -> ok Error.NullReferenceCreated
+    | InvalidEnumConstruction v ->
+        let+ v = eval_int v in
+        Error.InvalidEnumConstruction v
+    | ResumedAfterReturn -> ok Error.ResumedAfterReturn
+    | ResumedAfterPanic -> ok Error.ResumedAfterPanic
+    | ResumedAfterDrop -> ok Error.ResumedAfterDrop
+
   and eval_rvalue (expr : Expressions.rvalue) expr_ty =
     match expr with
     | Use (op, _) -> eval_operand op
@@ -1056,20 +1092,23 @@ module Make (StateImpl : State.S) = struct
             map_env (Store.dealloc local)
         | Uninit | Value _ | Unowned _ -> map_env (Store.dealloc local)
         | Dead -> ok ())
-    | Assert ({ cond; expected; check_kind = _ }, on_failure) ->
+    | Assert ({ cond; expected; check_kind }, on_failure) ->
         let* cond = eval_operand cond in
-        let cond_int = Typed.cast_lit TBool cond in
-        let cond_bool = BV.to_bool cond_int in
-        let cond_bool = if expected then cond_bool else Typed.not cond_bool in
-        let err =
-          match on_failure with
-          | UndefinedBehavior -> `UBAbort
-          | UnwindTerminate -> `UnwindTerminate
-          | Panic name ->
-              let name = Option.map (Fmt.to_to_string Crate.pp_name) name in
-              `Panic name
-        in
-        assert_ cond_bool err
+        let cond = BV.to_bool @@ Typed.cast_lit TBool cond in
+        let fail_cond = if expected then Typed.not cond else cond in
+        if%sat fail_cond then
+          let* err =
+            match (on_failure, check_kind) with
+            | UndefinedBehavior, _ -> ok `UBAbort
+            | UnwindTerminate, _ -> ok `UnwindTerminate
+            | Panic _, Some kind ->
+                let+ msg = eval_assert_msg kind in
+                `PanicCheck msg
+            | Panic name, None ->
+                ok (`Panic (Option.map (Fmt.to_to_string Crate.pp_name) name))
+          in
+          error err
+        else ok ()
     | Borrowck (FakeRead _ | SetType _ | SetOutlives _ | PredicateHolds _) ->
         ok ()
     | PlaceMention place ->
@@ -1244,7 +1283,27 @@ module Make (StateImpl : State.S) = struct
             let name = Option.map (Fmt.to_to_string Crate.pp_name) name in
             error (`Panic name))
     | UnwindResume -> State.pop_error ()
-    | TAssert _ -> L.failwith "Charon desugars assert terminators for us"
+    | TAssert ({ cond; expected; check_kind }, target, on_unwind) ->
+        let* cond = eval_operand cond in
+        let cond = BV.to_bool @@ Typed.cast_lit TBool cond in
+        let fail_cond = if expected then Typed.not cond else cond in
+        if%sat fail_cond then (
+          let* err =
+            match check_kind with
+            | Some kind ->
+                let+ msg = eval_assert_msg kind in
+                `PanicCheck msg
+            | None -> ok (`Panic None)
+          in
+          let* trace = get_trace () in
+          Error.log_at trace err;
+          let* () = State.add_error (Error.decorate trace err) in
+          [%l.info "Unwinding from failed assert"];
+          let block = UllbcAst.BlockId.nth body.body on_unwind in
+          exec_block ~body block)
+        else
+          let block = UllbcAst.BlockId.nth body.body target in
+          exec_block ~body block
     | InlineAsm _ -> not_impl "inline assembly is not supported"
 
   and exec_real_fun (fundef : UllbcAst.fun_decl) (generics : Types.generic_args)
