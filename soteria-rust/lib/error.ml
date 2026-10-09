@@ -2,12 +2,31 @@ open Charon
 open Common.Charon_util
 open Svalue
 
+(** Message of a failed built-in check inserted by rustc (e.g. bounds check),
+    with the values involved. Mirrors [GAst.builtin_assert_kind]. *)
+type assert_msg =
+  | BoundsCheck of { len : Typed.(T.sint t); index : Typed.(T.sint t) }
+  | Overflow of Expressions.binop * Typed.(T.sint t) * Typed.(T.sint t)
+  | OverflowNeg of Typed.(T.sint t)
+  | DivisionByZero of Typed.(T.sint t)
+  | RemainderByZero of Typed.(T.sint t)
+  | MisalignedPointerDereference of {
+      required : Typed.(T.sint t);
+      found : Typed.(T.sint t);
+    }
+  | NullPointerDereference
+  | NullReferenceCreated
+  | InvalidEnumConstruction of Typed.(T.sint t)
+  | ResumedAfterReturn
+  | ResumedAfterPanic
+  | ResumedAfterDrop
+
 type t =
   [ `DoubleFree  (** Tried freeing the same allocation twice *)
   | `InvalidFree  (** Tried freeing memory at a non-0 offset *)
   | `MemoryLeak  (** Dynamically allocated memory was not freed *)
   | `MisalignedPointer of
-    Typed.T.nonzero Typed.t * Typed.T.nonzero Typed.t * Typed.T.sint Typed.t
+    Typed.(T.nonzero t) * Typed.(T.nonzero t) * Typed.(T.sint t)
     (** Tried accessing memory with a misaligned pointer
         [(expected, received, offset)] *)
   | `NullDereference  (** Dereferenced a null pointer *)
@@ -44,7 +63,7 @@ type t =
   | `PointerArithmeticOverflow  (** Overflow on pointer arithmetic *)
   | `UBPointerComparison
     (** Comparison of pointers with different provenance *)
-  | `UBIntToPointerNoProvenance of Typed.T.sint Typed.t
+  | `UBIntToPointerNoProvenance of Typed.(T.sint t)
     (** Integer to pointer cast with no provenance *)
   | `UBIntToPointerStrict  (** Integer to pointer cast with strict provenance *)
   | `UBTransmute of string
@@ -57,6 +76,7 @@ type t =
         still exists *)
   | `FailedAssert of string option  (** Failed assert!(cond) *)
   | `Panic of string option  (** Regular panic, with a message *)
+  | `PanicCheck of assert_msg  (** Panic caused by a failed built-in check. *)
   | `UnwindTerminate  (** Unwinding terminated *)
   | `DeadVariable  (** Local was not initialised (impossible without `mir!`) *)
   | `Breakpoint  (** Breakpoint intrinsic *)
@@ -68,16 +88,57 @@ type t =
   | `OkExit
     (** Zero (succesful) exit; this is used to have short-circuiting; it should
         not be reported as an error! *)
-  | `Exit of Typed.T.sint Typed.t
+  | `Exit of Typed.(T.sint t)
     (** Exit with a specific (non-zero) code; this should be reported
         (probably..?). *) ]
 
 type warn_reason = InvalidReference of Typed.T.sloc Typed.t [@@deriving hash]
 
 let is_unwindable : [> t ] -> bool =
-  [%matches?
-    ( `NullDereference | `OutOfBounds | `DivisionByZero | `FailedAssert _
-    | `Panic _ | `Overflow )]
+  [%matches? `FailedAssert _ | `Panic _ | `PanicCheck _]
+
+let pp_assert_msg ft = function
+  | BoundsCheck { len; index } ->
+      Fmt.pf ft "index out of bounds: the len is %a but the index is %a"
+        Typed.ppa len Typed.ppa index
+  | Overflow (Shl _, _, r) ->
+      Fmt.pf ft "attempt to shift left by `%a`, which would overflow" Typed.ppa
+        r
+  | Overflow (Shr _, _, r) ->
+      Fmt.pf ft "attempt to shift right by `%a`, which would overflow" Typed.ppa
+        r
+  | Overflow (op, l, r) ->
+      let op =
+        match op with
+        | Add _ | AddChecked -> "+"
+        | Sub _ | SubChecked -> "-"
+        | Mul _ | MulChecked -> "*"
+        | Div _ -> "/"
+        | Rem _ -> "%"
+        | _ -> Fmt.to_to_string PrintFmt.pp_binop op
+      in
+      Fmt.pf ft "attempt to compute `%a %s %a`, which would overflow" Typed.ppa
+        l op Typed.ppa r
+  | OverflowNeg v ->
+      Fmt.pf ft "attempt to negate `%a`, which would overflow" Typed.ppa v
+  | DivisionByZero v -> Fmt.pf ft "attempt to divide `%a` by zero" Typed.ppa v
+  | RemainderByZero v ->
+      Fmt.pf ft
+        "attempt to calculate the remainder of `%a` with a divisor of zero"
+        Typed.ppa v
+  | MisalignedPointerDereference { required; found } ->
+      Fmt.pf ft
+        "misaligned pointer dereference: address must be a multiple of %a but \
+         is %a"
+        Typed.ppa required Typed.ppa found
+  | NullPointerDereference -> Fmt.string ft "null pointer dereference occurred"
+  | NullReferenceCreated -> Fmt.string ft "null reference created"
+  | InvalidEnumConstruction v ->
+      Fmt.pf ft "trying to construct an enum from an invalid value %a" Typed.ppa
+        v
+  | ResumedAfterReturn -> Fmt.string ft "coroutine resumed after completion"
+  | ResumedAfterPanic -> Fmt.string ft "coroutine resumed after panicking"
+  | ResumedAfterDrop -> Fmt.string ft "coroutine resumed after async drop"
 
 let rec pp ft : [> t ] -> unit = function
   | `AccessedFnPointer -> Fmt.string ft "Accessed function pointer's pointee"
@@ -120,6 +181,7 @@ let rec pp ft : [> t ] -> unit = function
   | `Overflow -> Fmt.string ft "Overflow"
   | `Panic (Some msg) -> Fmt.pf ft "Panic: %s" msg
   | `Panic None -> Fmt.pf ft "Panic"
+  | `PanicCheck msg -> Fmt.pf ft "Panic: %a" pp_assert_msg msg
   | `PointerArithmeticOverflow -> Fmt.string ft "Overflow on pointer arithmetic"
   | `RefInvalidatedEarly ->
       Fmt.string ft "Protected ref invalidated before function ended"

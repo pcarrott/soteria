@@ -17,8 +17,8 @@ env:
   OCAML_VERSION: 5.5.0
   # [versionsync: OBOL_REPO=N1ark/obol]
   OBOL_REPO: N1ark/obol
-  # [versionsync: OBOL_COMMIT_HASH=435d514e384a480c1c6599444057dff4377db2ce]
-  OBOL_COMMIT_HASH: 435d514e384a480c1c6599444057dff4377db2ce
+  # [versionsync: OBOL_COMMIT_HASH=2da99aed5c087815caf2b30a788bba440d354180]
+  OBOL_COMMIT_HASH: 2da99aed5c087815caf2b30a788bba440d354180
   # [versionsync: CHARON_REPO=AeneasVerif/charon]
   CHARON_REPO: AeneasVerif/charon
   # [versionsync: CHARON_COMMIT_HASH=933b01f7dea4b5fc31603c3f1731c6b4fb571b06]

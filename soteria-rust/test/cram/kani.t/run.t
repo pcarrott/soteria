@@ -279,7 +279,7 @@ Test our simple Kani demo works
   Compiling... done in <time>
   => Running demo::saturating_add_overflow...
   error: demo::saturating_add_overflow: found issues in <time>, errors in 1 branch (out of 3)
-  error: Overflow in demo::saturating_add_overflow
+  error: Panic: attempt to compute `V|1| + V|2|`, which would overflow in demo::saturating_add_overflow
       --> $TESTCASE_ROOT/demo.rs:11:8
     8 |  fn saturating_add_overflow() -> u32 {
       |  ----------------------------------- 1: Entry point
