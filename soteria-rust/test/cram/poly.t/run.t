@@ -178,3 +178,19 @@ Test linked lists, to ensure dropping the list works despite the generic type
         (0b0000000000000000000000000000000000000000000000000000000000001 <=u V|2|) /\
         ((((0b000 == extract[0-2](V|1|)) || (0b000 == extract[0-2](((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))))) ? ((0b000 == extract[0-2](V|1|)) ? (0x0000000000000010 +cks V|1|) : (0x0000000000000010 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))) : ((0x0000000000000018 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))) - extend[u61](extract[0-2](((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))))) == ((0b000 == extract[0-2](V|1|)) ? (0x0000000000000010 +ck V|1|) : (0x0000000000000010 +ck ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))))
   
+
+Reading the metadata of a pointer to a generic slice
+  $ soteria-rust exec slice_metadata.rs --frontend charon --poly
+  Compiling... done in <time>
+  => Running slice_metadata::main...
+  note: slice_metadata::main: done in <time>, ran 1 branch
+  PC 1: empty
+  
+
+A promoted constant pointing to a local of its initialiser
+  $ soteria-rust exec promoted_ref.rs --frontend charon --poly
+  Compiling... done in <time>
+  => Running promoted_ref::main...
+  note: promoted_ref::main: done in <time>, ran 1 branch
+  PC 1: empty
+  

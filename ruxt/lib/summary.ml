@@ -1,6 +1,8 @@
 open Soteria.Soteria_std
 open Syntaxes.FunctionWrap
+module Config_ = Config
 open Soteria_rust_lib
+module Config = Config_
 module Typed = Svalue.Typed
 
 module State = struct

@@ -13,7 +13,8 @@ module Place = struct
     | Local of Expressions.local_id
     | Field of t * Types.variant_id option * Types.field_id
     | Index of t * int (* Store places only support concrete offsets *)
-    | Metadata of t (* The metadata "field" of a (possibly fat) pointer *)
+    | Metadata of t * Layout.meta_kind
+        (** The metadata "field" of a (possibly fat) pointer *)
 
   (** A simple place that lives on the store and doesn't need to be decayed to
       the heap for reading or writing. Almost identical to [Expressions.place],
@@ -26,13 +27,13 @@ module Place = struct
     | Field (base, _, field) ->
         Fmt.pf ft "%a.%a" pp base Types.pp_field_id field
     | Index (base, idx) -> Fmt.pf ft "%a[%d]" pp base idx
-    | Metadata base -> Fmt.pf ft "%a.metadata" pp base
+    | Metadata (base, _) -> Fmt.pf ft "%a.metadata" pp base
 
   (** Local root of the place *)
   let rec root p =
     match p.kind with
     | Local v -> v
-    | Field (base, _, _) | Index (base, _) | Metadata base -> root base
+    | Field (base, _, _) | Index (base, _) | Metadata (base, _) -> root base
 
   (** [update_val sp inner' v] updates the root value [v] with the value at [sp]
       replaced by [inner']; [None] if [sp] is not navigable. *)
@@ -71,7 +72,7 @@ module Place = struct
         Typed.Adt.field_of idx (Typed.cast_tuple (read_val base v))
     | Index (base, idx) ->
         Typed.Adt.array_field_of idx (Typed.cast_array (read_val base v))
-    | Metadata base -> (
+    | Metadata (base, meta_kind) -> (
         (* the metadata projection output: [()] for thin pointer, [usize] for
            slices, and [ptr::DynMetadata] for VTables. However our frontend
            likes to sometimes treat the metadata as a raw pointer, so we much
@@ -86,8 +87,7 @@ module Place = struct
               L.failwith "tried loading metadata of non-pointer: %a" pp_ty
                 base.origin.ty
         in
-        let pointee = get_pointee base.origin.ty in
-        match Layout.dst_kind pointee with
+        match meta_kind with
         | NoneKind -> Typed.as_any Typed.Adt.unit
         | LenKind -> Typed.as_any (Typed.Ptr.len_meta ptr)
         | VTableKind ->

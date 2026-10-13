@@ -114,14 +114,19 @@ module Make (StateImpl : State.S) = struct
       iter_list protected ~f:(fun (ptr, ty) -> State.unprotect ptr ty)
     in
     let* store = get_env () in
-    iter_iter (Store.iter_bindings store) ~f:(fun (_, binding) ->
-        match (binding.kind, protected_address) with
-        | (Dead | Uninit | Value _ | Unowned _), _ -> ok ()
-        | Stackptr ptr, None -> State.free ptr
-        | Stackptr fptr, Some protect ->
-            let ptr = Typed.Ptr.ptr_of fptr in
-            if%sat Typed.Ptr.have_same_provenance ptr protect then ok ()
-            else State.free fptr)
+    let*^ alloc_kind = Rustsymex.get_alloc_kind () in
+    (* The locals of a constant's initialiser are constant allocations, that
+       must outlive it as the constant may point to them. *)
+    if [%matches? (Const _ : Alloc_kind.t)] alloc_kind then ok ()
+    else
+      iter_iter (Store.iter_bindings store) ~f:(fun (_, binding) ->
+          match (binding.kind, protected_address) with
+          | (Dead | Uninit | Value _ | Unowned _), _ -> ok ()
+          | Stackptr ptr, None -> State.free ptr
+          | Stackptr fptr, Some protect ->
+              let ptr = Typed.Ptr.ptr_of fptr in
+              if%sat Typed.Ptr.have_same_provenance ptr protect then ok ()
+              else State.free fptr)
 
   let resolve_fn_ptr (fn : Types.fn_ptr) : Fun_kind.t t =
     let open Fun_kind in
@@ -527,8 +532,9 @@ module Make (StateImpl : State.S) = struct
         let++ base = build_store_place base in
         Store.Place.{ kind = Field (base, variant, field); origin }
     | PlaceProjection (base, PtrMetadata) ->
+        let* pointee = Layout.normalise (get_pointee base.ty) in
         let++ base = build_store_place base in
-        Store.Place.{ kind = Metadata base; origin }
+        Store.Place.{ kind = Metadata (base, Layout.dst_kind pointee); origin }
     | PlaceProjection (base, ProjIndex (idx, from_end)) ->
         let** base_sp = build_store_place base in
         let* idx = eval_operand idx in
