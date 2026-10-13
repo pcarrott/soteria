@@ -194,6 +194,8 @@ let set_and_lock_global (config : global) =
           sysroot = config.ruxt.sysroot;
           offline = config.ruxt.offline;
           test = None;
+          lib = false;
+          with_libtest = false;
           with_kani = config.ruxt.with_kani;
           with_miri = config.ruxt.with_miri;
           (* No entry points needed as RUXt is compositional *)
@@ -202,6 +204,7 @@ let set_and_lock_global (config : global) =
           print_summary = config.ruxt.print_summary;
           list_tests = false;
           show_pcs = config.ruxt.show_pcs;
+          show_manifest_summaries = false;
           (* Ignore leaks in Soteria, we implement our own leak check *)
           ignore_leaks = true;
           (* Tree borrows are not supported *)

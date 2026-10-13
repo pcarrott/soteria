@@ -244,7 +244,7 @@ module Context = struct
   type nonrec t = (t list * t list * t list) M.t
 
   let empty : t = M.empty
-  let is_base_ty ty = match ty with TLiteral _ -> true | _ -> false
+  let is_base_ty ty = match ty with TScalar _ -> true | _ -> false
 
   let ( let@ ) (ty, default) f =
     match ty with TAdt { id; _ } -> f id | _ -> default
