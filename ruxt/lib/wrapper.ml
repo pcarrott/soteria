@@ -84,17 +84,19 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
   let summ = if_rmut ~then_:(fun _ -> Some (List.hd summs)) ~else_:None in
   let summs = if_rmut ~then_:(fun _ -> List.tl summs) ~else_:summs in
   (* Check reference arguments and allocate values on heap *)
-  let** args, arg_ptrs, subst =
+  let** args, arg_ptrs =
     ListLabels.fold_left2 summs fun_decl.signature.inputs
-      ~init:(State.SM.Result.ok ([], [], Summary.Typed.Expr.Subst.empty))
+      ~init:(State.SM.Result.ok ([], []))
       ~f:(fun acc summ ty ->
-        let** args, arg_ptrs, subst = acc in
-        let* arg, subst = Summary.run_producer subst summ in
+        let** args, arg_ptrs = acc in
+        let* arg, _ =
+          Summary.run_producer Summary.Typed.Expr.Subst.empty summ
+        in
         match ty with
         | Types.TRef (_, ty, _) ->
             let++ ptr = alloc ty arg in
-            (ptr :: args, (ty, ptr) :: arg_ptrs, subst)
-        | _ -> State.SM.Result.ok (arg :: args, arg_ptrs, subst))
+            (ptr :: args, (ty, ptr) :: arg_ptrs)
+        | _ -> State.SM.Result.ok (arg :: args, arg_ptrs))
   in
   let args = List.rev args in
   (* Symbolically execute the function call *)
@@ -108,7 +110,9 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
         ()
     | TRef (_, ty, RMut) ->
         (* For mutable references, we write safe values to the pointer *)
-        let* rv, _ = Summary.run_producer subst (Option.get summ) in
+        let* rv, _ =
+          Summary.run_producer Summary.Typed.Expr.Subst.empty (Option.get summ)
+        in
         State.store (Summary.Value.as_ptr ret) ty rv
     | _ -> State.SM.Result.ok ()
   in
