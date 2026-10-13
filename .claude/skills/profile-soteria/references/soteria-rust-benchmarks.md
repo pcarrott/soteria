@@ -127,9 +127,9 @@ and the repo will not build against the new Charon until you undo it:
 
 ```bash
 opam pin add -y --no-action charon.~dev \
-  "git+https://github.com/soteria-tools/charon#<NEW_CHARON_HASH>"
+  "git+https://github.com/AeneasVerif/charon#<NEW_CHARON_HASH>"
 opam pin add -y --no-action name_matcher_parser.~dev \
-  "git+https://github.com/soteria-tools/charon#<NEW_CHARON_HASH>"
+  "git+https://github.com/AeneasVerif/charon#<NEW_CHARON_HASH>"
 opam install -y charon name_matcher_parser
 ```
 

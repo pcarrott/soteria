@@ -20,7 +20,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let abort () : unit ret = error (`Panic (Some "aborted"))
 
   let checked_op op ~t ~x ~y =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let x = Typed.cast_lit t x in
     let y = Typed.cast_lit t y in
     Core.eval_checked_lit_binop op t x y
@@ -39,15 +39,14 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     let dst_full = Typed.cast_ptr_f dst_full in
     let dst = Typed.Ptr.ptr_of dst_full in
     let offset = Typed.cast_i Usize offset in
-    let check_signed = Layout.is_signed @@ TypesUtils.ty_as_literal delta in
+    let check_signed = Layout.is_signed @@ TypesUtils.ty_as_scalar delta in
     let+ dst' = Sptr.offset ~check_signed ~ty:ptr offset dst in
     Typed.Ptr.with_ptr dst_full dst'
 
   let assert_inhabited ~t =
     let* layout = Layout.layout_of t in
-    if layout.uninhabited then
-      error (`Panic (Some "core::intrinsics::assert_inhabited"))
-    else ok ()
+    assert_not layout.uninhabited
+      (`Panic (Some "core::intrinsics::assert_inhabited"))
 
   let assert_mem_uninitialized_valid ~t:_ = ok ()
 
@@ -102,7 +101,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
           let curr = Typed.Ptr.ptr_of (Typed.cast_ptr_f curr) in
           let+ dist = Sptr.distance old curr in
           dist ==@ Usize.(0s)
-      | TLiteral lit ->
+      | TScalar lit ->
           let old = Typed.cast_lit lit old in
           let curr = Typed.cast_lit lit curr in
           ok (old ==@ curr)
@@ -126,13 +125,13 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     atomic_warn ();
     let* old = State.load dst t in
     match (t, u) with
-    | (TRawPtr (_, _) | TRef (_, _, _)), TLiteral (TUInt Usize) ->
+    | (TRawPtr (_, _) | TRef (_, _, _)), TScalar (TInteger (Unsigned Usize)) ->
         let old_fptr = Typed.cast_ptr_f old in
         let old_ptr = Typed.Ptr.ptr_of old_fptr in
         let* new_ptr = ptr_op (Typed.cast_i Usize src) old_ptr in
         let+ () = State.store dst t (Typed.Ptr.with_ptr old_fptr new_ptr) in
         old
-    | TLiteral lit, _ ->
+    | TScalar lit, _ ->
         let* res =
           int_op lit (Typed.cast_lit lit old) (Typed.cast_lit lit src)
         in
@@ -183,7 +182,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let atomic_int_rmw ~(t : Types.ty) ~dst ~src f =
     atomic_warn ();
     match t with
-    | TLiteral lit ->
+    | TScalar lit ->
         let* old = State.load dst t in
         let+ () =
           State.store dst t
@@ -210,7 +209,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let breakpoint () : unit ret = error `Breakpoint
 
   let bitreverse ~t ~x =
-    let lit = TypesUtils.ty_as_literal t in
+    let lit = TypesUtils.ty_as_scalar t in
     let nbits = 8 * Layout.size_of_literal_ty lit in
     let v = Typed.cast_lit lit x in
     let bits = List.init nbits (fun i -> BV.extract i i v) in
@@ -222,7 +221,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     ok @@ Typed.as_any (aux bits)
 
   let bswap ~t ~x =
-    let lit = TypesUtils.ty_as_literal t in
+    let lit = TypesUtils.ty_as_scalar t in
     let nbytes = Layout.size_of_literal_ty lit in
     let v = Typed.cast_lit lit x in
     let bytes =
@@ -276,8 +275,8 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     (ptr : Typed.T.sptr_f Typed.t :> Typed.([> T.sptr_f ] t))
 
   let carrying_mul_add ~t ~u ~multiplier ~multiplicand ~addend ~carry =
-    let t = TypesUtils.ty_as_literal t in
-    let u = TypesUtils.ty_as_literal u in
+    let t = TypesUtils.ty_as_scalar t in
+    let u = TypesUtils.ty_as_scalar u in
     let size_t = Layout.size_of_literal_ty t in
     let+ () =
       if size_t <> Layout.size_of_literal_ty u then
@@ -338,7 +337,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     match Typed.Float.approx Stdlib.Float.cos x with
     | Some res -> ok res
     | None ->
-        let* res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+        let* res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
         let res = Typed.cast_float res in
         let+ () =
           if%sat Typed.Float.is_nan x ||@ Typed.Float.is_infinite x then
@@ -354,17 +353,20 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
         in
         res
 
-  let cosf16 ~x = cos_ F16 x
-  let cosf32 ~x = cos_ F32 x
-  let cosf64 ~x = cos_ F64 x
-  let cosf128 ~x = cos_ F128 x
+  (* Lifts a float operation on a known float type to a generic intrinsic. *)
+  let float_unop f ~t ~x =
+    let fp = ty_as_float t in
+    let+ res = f fp (Typed.cast_f fp x) in
+    Typed.as_any res
+
+  let cos ~t ~x = float_unop cos_ ~t ~x
 
   let sin_ fp x =
     let* () = Core.floating_inaccuracy_warn () in
     match Typed.Float.approx Stdlib.Float.sin x with
     | Some res -> ok res
     | None ->
-        let* res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+        let* res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
         let res = Typed.cast_float res in
         let+ () =
           if%sat Typed.Float.is_nan x ||@ Typed.Float.is_infinite x then
@@ -380,10 +382,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
         in
         res
 
-  let sinf16 ~x = sin_ F16 x
-  let sinf32 ~x = sin_ F32 x
-  let sinf64 ~x = sin_ F64 x
-  let sinf128 ~x = sin_ F128 x
+  let sin ~t ~x = float_unop sin_ ~t ~x
 
   (* Largest exponent we expand; beyond this the term grows without buying much,
      so we fall back to a nondet. *)
@@ -482,7 +481,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
               &&@ Typed.not (Typed.Float.is_nan y)
             then pow_approx fp x y
             else
-              let+ res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+              let+ res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
               Typed.cast_float res)
 
   let powf16 ~a ~x = pow_ F16 a x
@@ -493,7 +492,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let powi_ fp x y =
     let* () = Core.floating_inaccuracy_warn () in
     let nondet () =
-      let+ res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+      let+ res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
       Typed.cast_float res
     in
     match
@@ -555,20 +554,13 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
         else if%sat Typed.Float.is_infinite x &&@ (x <.@ Typed.Float.zero fp)
         then ok (Typed.Float.zero fp)
         else
-          let* res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+          let* res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
           let res = Typed.cast_float res in
           let+ () = assume_sym [ res >.@ Typed.Float.zero fp ] in
           res
 
-  let expf16 ~x = expf_ ~f:Stdlib.Float.exp F16 x
-  let expf32 ~x = expf_ ~f:Stdlib.Float.exp F32 x
-  let expf64 ~x = expf_ ~f:Stdlib.Float.exp F64 x
-  let expf128 ~x = expf_ ~f:Stdlib.Float.exp F128 x
-  let exp2 = Stdlib.Float.pow 2.0
-  let exp2f16 ~x = expf_ ~f:exp2 F16 x
-  let exp2f32 ~x = expf_ ~f:exp2 F32 x
-  let exp2f64 ~x = expf_ ~f:exp2 F64 x
-  let exp2f128 ~x = expf_ ~f:exp2 F128 x
+  let exp ~t ~x = float_unop (expf_ ~f:Stdlib.Float.exp) ~t ~x
+  let exp2 ~t ~x = float_unop (expf_ ~f:(Stdlib.Float.pow 2.0)) ~t ~x
 
   let logf_ ~exp ~f fp x =
     let* () = Core.floating_inaccuracy_warn () in
@@ -582,7 +574,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
         else if%sat Typed.Float.is_infinite x then ok (Typed.Float.infinity fp)
         else if%sat x ==.@ exp then ok (Typed.Float.one fp)
         else
-          let* res = Value_codec.nondet_valid (TLiteral (TFloat fp)) in
+          let* res = Value_codec.nondet_valid (TScalar (TFloat fp)) in
           let res = Typed.cast_float res in
           let+ () =
             if%sat x <.@ exp then assume_sym [ res <.@ Typed.Float.one fp ]
@@ -591,18 +583,9 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
           res
 
   let e_value = Stdlib.Float.(to_string @@ exp 1.0)
-  let logf16 ~x = logf_ ~exp:e_value ~f:Stdlib.Float.log F16 x
-  let logf32 ~x = logf_ ~exp:e_value ~f:Stdlib.Float.log F32 x
-  let logf64 ~x = logf_ ~exp:e_value ~f:Stdlib.Float.log F64 x
-  let logf128 ~x = logf_ ~exp:e_value ~f:Stdlib.Float.log F128 x
-  let log10f16 ~x = logf_ ~exp:"10" ~f:Stdlib.Float.log10 F16 x
-  let log10f32 ~x = logf_ ~exp:"10" ~f:Stdlib.Float.log10 F32 x
-  let log10f64 ~x = logf_ ~exp:"10" ~f:Stdlib.Float.log10 F64 x
-  let log10f128 ~x = logf_ ~exp:"10" ~f:Stdlib.Float.log10 F128 x
-  let log2f16 ~x = logf_ ~exp:"2" ~f:Stdlib.Float.log2 F16 x
-  let log2f32 ~x = logf_ ~exp:"2" ~f:Stdlib.Float.log2 F32 x
-  let log2f64 ~x = logf_ ~exp:"2" ~f:Stdlib.Float.log2 F64 x
-  let log2f128 ~x = logf_ ~exp:"2" ~f:Stdlib.Float.log2 F128 x
+  let log ~t ~x = float_unop (logf_ ~exp:e_value ~f:Stdlib.Float.log) ~t ~x
+  let log10 ~t ~x = float_unop (logf_ ~exp:"10" ~f:Stdlib.Float.log10) ~t ~x
+  let log2 ~t ~x = float_unop (logf_ ~exp:"2" ~f:Stdlib.Float.log2) ~t ~x
   let[@inline] float_rounding rm x = ok (Typed.Float.round rm x)
   let ceilf16 ~x = float_rounding Ceil x
   let ceilf32 ~x = float_rounding Ceil x
@@ -725,7 +708,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
 
   (** Applies either [concrete] or [symbolic] to a bitvector. *)
   let binary_int_operation ~concrete ~symbolic ~t ~x : [> T.sint ] Typed.t ret =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let bits = 8 * Layout.size_of_literal_ty t in
     let x = Typed.cast_lit t x in
     match BV.to_z x with
@@ -769,7 +752,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     binary_int_operation ~concrete ~symbolic ~t ~x
 
   let cttz_nonzero ~t ~x =
-    let tlit = TypesUtils.ty_as_literal t in
+    let tlit = TypesUtils.ty_as_scalar t in
     let x_int = Typed.cast_lit tlit x in
     let* () =
       assert_not
@@ -804,7 +787,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     binary_int_operation ~concrete ~symbolic ~t ~x
 
   let ctlz_nonzero ~t ~x =
-    let tlit = TypesUtils.ty_as_literal t in
+    let tlit = TypesUtils.ty_as_scalar t in
     let x_int = Typed.cast_lit tlit x in
     let* () =
       assert_not
@@ -820,7 +803,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
       else ok U8.(0s)
 
   let disjoint_bitor ~t ~a ~b =
-    let ty = TypesUtils.ty_as_literal t in
+    let ty = TypesUtils.ty_as_scalar t in
     let a = Typed.cast_lit ty a in
     let b = Typed.cast_lit ty b in
     let+ () =
@@ -831,7 +814,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     a |@ b
 
   let exact_div ~t ~x ~y =
-    let lit = TypesUtils.ty_as_literal t in
+    let lit = TypesUtils.ty_as_scalar t in
     let x = Typed.cast_lit lit x in
     let y = Typed.cast_lit lit y in
     let* res = Core.eval_lit_binop (Div OUB) lit x y in
@@ -844,8 +827,16 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     in
     res
 
+  let integer_minmax op ~t ~a ~b =
+    let lit = TypesUtils.ty_as_scalar t in
+    let a = Typed.cast_lit lit a and b = Typed.cast_lit lit b in
+    ok (Typed.as_any (op ~signed:(Layout.is_signed lit) a b))
+
+  let integer_max ~t ~a ~b = integer_minmax BV.max ~t ~a ~b
+  let integer_min ~t ~a ~b = integer_minmax BV.min ~t ~a ~b
+
   let fabs ~t ~x =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let f =
       match t with TFloat f -> f | _ -> L.failwith "fabs with non-float?"
     in
@@ -905,7 +896,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
 
   let float_to_int_unchecked ~float ~int ~value =
     let fty = ty_as_float float in
-    let ity = TypesUtils.ty_as_literal int in
+    let ity = TypesUtils.ty_as_scalar int in
     let f = Typed.cast_f fty value in
     let* () =
       assert_not
@@ -914,6 +905,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     in
     let signed = Layout.is_signed ity in
     let size = 8 * Layout.size_of_literal_ty ity in
+    let ity = TypesUtils.scalar_as_integer ity in
     let max = Typed.Float.of_z fty (Z.succ @@ Layout.max_value_z ity) in
     let min = Typed.Float.of_z fty (Z.pred @@ Layout.min_value_z ity) in
     (* we use min-1 and max+1, to be able to have a strict inequality, which
@@ -1029,7 +1021,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     |> fun b -> ok (b : Typed.T.sbool Typed.t :> Typed.([> T.sbool ] t))
 
   let rotate_ ~(side : [ `Left | `Right ]) ~t ~x ~shift =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let bits = 8 * Layout.size_of_literal_ty t in
     let x = Typed.cast_lit t x in
     match BV.to_z shift with
@@ -1060,12 +1052,13 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let rotate_right ~t ~x ~shift = rotate_ ~side:`Right ~t ~x ~shift
 
   let saturating (op : Expressions.binop) ~t ~a ~b =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
+    let ity = TypesUtils.scalar_as_integer t in
     let signed = Layout.is_signed t in
     let a = Typed.cast_lit t a in
     let b = Typed.cast_lit t b in
-    let max = BV.mk_lit t @@ Layout.max_value_z t in
-    let min = BV.mk_lit t @@ Layout.min_value_z t in
+    let max = BV.mk_lit t @@ Layout.max_value_z ity in
+    let min = BV.mk_lit t @@ Layout.min_value_z ity in
     let res =
       match op with
       | Add _ ->
@@ -1137,14 +1130,14 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     type_id_of_unknown "type_id_field_representing_type"
 
   let unchecked_op op ~t ~x ~y =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let x = Typed.cast_lit t x in
     let y = Typed.cast_lit t y in
     let+ res = Core.eval_lit_binop op t x y in
     res
 
   let funnel_ ~(side : [ `Left | `Right ]) ~t ~a ~b ~shift =
-    let t = TypesUtils.ty_as_literal t in
+    let t = TypesUtils.ty_as_scalar t in
     let bits = 8 * Layout.size_of_literal_ty t in
     let a = Typed.cast_lit t a in
     let b = Typed.cast_lit t b in
@@ -1183,17 +1176,19 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let read_vtable ~slot ~ptr : [> T.sint ] Typed.t ret =
     let ptr = Typed.Ptr.ptr_of ptr in
     let* ptr =
-      Sptr.offset ~check_signed:true ~ty:(TLiteral (TUInt Usize))
+      Sptr.offset ~check_signed:true ~ty:(TScalar (TInteger (Unsigned Usize)))
         (BV.usizei slot) ptr
     in
-    let+ align = State.load (Typed.Ptr.of_ptr_t ptr) (TLiteral (TUInt Usize)) in
+    let+ align =
+      State.load (Typed.Ptr.of_ptr_t ptr) (TScalar (TInteger (Unsigned Usize)))
+    in
     Typed.cast_i Usize align
 
   let vtable_align ~ptr = read_vtable ~slot:2 ~ptr
   let vtable_size ~ptr = read_vtable ~slot:1 ~ptr
 
   let wrapping_op op ~t ~a ~b =
-    let ity = TypesUtils.ty_as_literal t in
+    let ity = TypesUtils.ty_as_scalar t in
     let a = Typed.cast_lit ity a in
     let b = Typed.cast_lit ity b in
     let+ res = Core.eval_lit_binop op ity a b in
@@ -1260,18 +1255,18 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
   let simd_float_lanes fty = simd_lanes_with (Typed.cast_f fty)
 
   let simd_of_lanes ty lanes =
-    Typed.Adt.mk_tuple [ Typed.Adt.mk_array (TLiteral ty) lanes ]
+    Typed.Adt.mk_tuple [ Typed.Adt.mk_array (TScalar ty) lanes ]
 
   (* The element type of a SIMD vector, i.e. the [T] in its `[T; N]` field. *)
-  let simd_elem_lit (ty : Types.ty) : Types.literal_type =
+  let simd_elem_lit (ty : Types.ty) : Types.scalar_type =
     match Crate.as_struct_tys (ty_as_adt ty) with
-    | [ TArray (TLiteral lit, _) ] -> lit
+    | [ TArray (TScalar lit, _, _) ] -> lit
     | _ -> Fmt.failwith "expected a SIMD vector type, got %a" pp_ty ty
 
   (* The number of lanes [N] of a SIMD vector. *)
   let simd_len (ty : Types.ty) =
     match Crate.as_struct_tys (ty_as_adt ty) with
-    | [ TArray (_, len) ] ->
+    | [ TArray (_, len, _) ] ->
         let* len =
           of_opt_not_impl "simd_len with generic length"
             (BV.of_constant_expr_opt len)
@@ -1354,12 +1349,12 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).Impl = struct
     let* idx =
       of_opt_not_impl "Using a symbolic index on simd_extract" (BV.to_z idx)
     in
-    let lit = TypesUtils.ty_as_literal u in
+    let lit = TypesUtils.ty_as_scalar u in
     let+ x = simd_lanes lit x in
     Iarray.get x (Z.to_int idx)
 
   let simd_splat ~t ~u ~value =
-    let ty = TypesUtils.ty_as_literal u in
+    let ty = TypesUtils.ty_as_scalar u in
     let+ len = simd_len t in
     simd_of_lanes ty (Iarray.init len (fun _ -> value))
 end

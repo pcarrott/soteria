@@ -13,8 +13,8 @@ module Fields_shape = struct
     | Known of Types.variant_id
     | Branch of {
         offset : T.sint Typed.t;
-        tag_ty : Types.literal_type;
-            [@printer Fmt.of_to_string Print.literal_type_to_string]
+        tag_ty : Types.scalar_type;
+            [@printer Fmt.of_to_string Print.scalar_type_to_string]
         children : (T.sint Typed.t * T.sint Typed.t * discriminator) list;
         fallback : discriminator;
       }
@@ -110,17 +110,18 @@ end
 type t = {
   size : Typed.T.sint Typed.t;
   align : Typed.T.nonzero Typed.t;
-  uninhabited : bool;
+  uninhabited : Typed.T.sbool Typed.t;
   fields : Fields_shape.t;
 }
 [@@deriving show]
 
-let iter_vars ({ size; align; fields; uninhabited = _ } : t)
+let iter_vars ({ size; align; fields; uninhabited } : t)
     (f : Svalue.Var.t * 'a Typed.ty -> unit) : unit =
   iter_vars size f;
   iter_vars align f;
+  iter_vars uninhabited f;
   Fields_shape.iter_vars fields f
 
 (** Whether this layout is an aggregate layout, i.e. it has several fields,
     rather than representing just one atomic value. *)
-let is_aggregate l = match l.fields with Primitive -> false | _ -> true
+let is_aggregate = [%matches? { fields = Arbitrary _ | Enum _ | Array _; _ }]

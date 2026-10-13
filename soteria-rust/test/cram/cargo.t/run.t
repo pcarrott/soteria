@@ -1,5 +1,5 @@
 Test running Soteria Rust on a crate
-  $ soteria-rust exec .
+  $ test_auto_crate exec .
   Compiling... done in <time>
   => Running my_crate::tests::tests::my_test...
   note: my_crate::tests::tests::my_test: done in <time>, ran 2 branches

@@ -1,10 +1,10 @@
 {
   "_comment": "Central version configuration for Soteria. Run `scripts/versionsync.py check` to verify versions are in sync, or `scripts/versionsync.py update` to update versions everywhere.",
   "SOTERIA_VERSION": "0.2.3",
-  "CHARON_REPO": "soteria-tools/charon",
-  "CHARON_COMMIT_HASH": "26cee99d259d3c106394e2e1ab53f3feaa11f3c9",
-  "OBOL_REPO": "soteria-tools/obol",
-  "OBOL_COMMIT_HASH": "514e0fa36ecba85da8e3a764f869634488f4782f",
+  "CHARON_REPO": "AeneasVerif/charon",
+  "CHARON_COMMIT_HASH": "933b01f7dea4b5fc31603c3f1731c6b4fb571b06",
+  "OBOL_REPO": "N1ark/obol",
+  "OBOL_COMMIT_HASH": "2da99aed5c087815caf2b30a788bba440d354180",
   "OCAMLFORMAT_VERSION": "0.29.0",
   "OCAML_VERSION": "5.5.0",
   "DUNE_VERSION": "3.23.1"

@@ -35,6 +35,17 @@ let with_exn_and_config mode config f =
       Analyses.Outcome.exit Error
   | Exn.Config_error err ->
       fatal ~name:"Config" ~code:Cmdliner.Cmd.Exit.cli_error err
+  | Analyses.Biab.Uncaught.Uncaught_exception (where, e) ->
+      let bt = Printexc.get_backtrace () in
+      let phase =
+        match where with
+        | Generating_summary fn -> Fmt.str "generating summary for %s" fn
+        | Analysing_summary fn -> Fmt.str "analysing summary for %s" fn
+      in
+      Fmt.epr "%a while %s:@\n  %s@.@?" pp_err "uncaught exception" phase
+        (Printexc.to_string e);
+      if bt <> "" then Fmt.epr "%s@.@?" bt;
+      Analyses.Outcome.exit Fatal
 
 (* Prints the list of testing entry points as a one-line JSON list to stdout, if
    [--list-tests] is set. This is the only thing printed to stdout by [compile],
@@ -66,6 +77,11 @@ let exec_wpst config target =
   let@ () = with_exn_and_config Whole_program config in
   let targets = do_compilation target in
   Analyses.Wpst.exec targets
+
+let exec_biab config target =
+  let@ () = with_exn_and_config Compositional config in
+  let compile () = Frontend.parse_ullbc target in
+  wrap_step "Compiling" compile |> Analyses.Biab.generate_summaries
 
 let build_plugins config =
   let@ () = with_exn_and_config Whole_program config in

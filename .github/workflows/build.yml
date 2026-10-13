@@ -15,14 +15,14 @@ on:
 env:
   # [versionsync: OCAML_VERSION=5.5.0]
   OCAML_VERSION: 5.5.0
-  # [versionsync: OBOL_REPO=soteria-tools/obol]
-  OBOL_REPO: soteria-tools/obol
-  # [versionsync: OBOL_COMMIT_HASH=514e0fa36ecba85da8e3a764f869634488f4782f]
-  OBOL_COMMIT_HASH: 514e0fa36ecba85da8e3a764f869634488f4782f
-  # [versionsync: CHARON_REPO=soteria-tools/charon]
-  CHARON_REPO: soteria-tools/charon
-  # [versionsync: CHARON_COMMIT_HASH=26cee99d259d3c106394e2e1ab53f3feaa11f3c9]
-  CHARON_COMMIT_HASH: 26cee99d259d3c106394e2e1ab53f3feaa11f3c9
+  # [versionsync: OBOL_REPO=N1ark/obol]
+  OBOL_REPO: N1ark/obol
+  # [versionsync: OBOL_COMMIT_HASH=2da99aed5c087815caf2b30a788bba440d354180]
+  OBOL_COMMIT_HASH: 2da99aed5c087815caf2b30a788bba440d354180
+  # [versionsync: CHARON_REPO=AeneasVerif/charon]
+  CHARON_REPO: AeneasVerif/charon
+  # [versionsync: CHARON_COMMIT_HASH=933b01f7dea4b5fc31603c3f1731c6b4fb571b06]
+  CHARON_COMMIT_HASH: 933b01f7dea4b5fc31603c3f1731c6b4fb571b06
 
 jobs:
   build:
@@ -64,8 +64,12 @@ jobs:
           # Disabled: we get dune from the opam cache already
           dune-cache: false
           opam-pin: false
+      # Large caches are only saved from main: caches saved from PR refs can't
+      # be shared, and their size pushes the repo over the cache quota, which
+      # evicts main's caches and makes every run rebuild from scratch.
       - name: Restore opam cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        id: restore-opam-cache
         with:
           path: _opam
           key: ${{ runner.os }}-${{ runner.arch }}-opam-${{ env.OCAML_VERSION }}-${{ hashFiles('*.opam') }}
@@ -87,8 +91,43 @@ jobs:
       # OCaml build
       - name: setup dependencies
         run: make ocaml-deps
+      - name: Opam Cleanup
+        run: opam clean -a -r
+      - name: Save opam cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        if: github.ref == 'refs/heads/main' && steps.restore-opam-cache.outputs.cache-hit != 'true'
+        with:
+          path: _opam
+          key: ${{ steps.restore-opam-cache.outputs.cache-primary-key }}
+
+      - name: Restore dune cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        id: restore-dune-cache
+        with:
+          path: ${{ runner.temp }}/dune-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-dune-${{ env.OCAML_VERSION }}-${{ hashFiles('*.opam') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-dune-${{ env.OCAML_VERSION }}-${{ hashFiles('*.opam') }}-
+      # The dune cache also stores the results of cram tests and of other
+      # actions with undeclared dependencies (e.g. Obol, Charon, z3), so only
+      # the build step uses the restored cache and later steps get an empty
+      # one. DUNE_CACHE itself must stay the same across steps: changing it
+      # makes dune rebuild everything.
+      - name: Configure dune cache
+        run: |
+          echo "DUNE_CACHE=enabled" >> $GITHUB_ENV
+          echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/dune-cache-empty" >> $GITHUB_ENV
       - name: Build OCaml stuff
-        run: make ocaml
+        run: DUNE_CACHE_ROOT=$RUNNER_TEMP/dune-cache make ocaml
+      - name: Trim dune cache
+        if: github.ref == 'refs/heads/main'
+        run: DUNE_CACHE_ROOT=$RUNNER_TEMP/dune-cache opam exec -- dune cache trim --size=1GB
+      - name: Save dune cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: ${{ runner.temp }}/dune-cache
+          key: ${{ steps.restore-dune-cache.outputs.cache-primary-key }}
       - name: Check formatting
         run: make ocaml-format-check
       - name: Check mld formatting
@@ -108,25 +147,15 @@ jobs:
         with:
           path: charon-bin
           key: ${{ runner.os }}-${{ runner.arch }}-charon-${{ env.CHARON_COMMIT_HASH }}
-      - name: Restore cargo cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            ../obol/target
-            ../charon/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ env.OBOL_COMMIT_HASH }}-${{ env.CHARON_COMMIT_HASH }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
-        if: ${{ !steps.restore-charon-cache.outputs.cache-hit || !steps.restore-obol-cache.outputs.cache-hit }}
       # On macOS, we need make
       - name: Install gmake (macOS)
         run: brew install make
         if: ${{ (!steps.restore-charon-cache.outputs.cache-hit || !steps.restore-obol-cache.outputs.cache-hit) && runner.os == 'macOS' }}
       - name: Install Obol if not cached
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
         run: |
+          git config --global url."https://github.com/AeneasVerif/charon".insteadOf "https://github.com/soteria-tools/charon"
           $GITHUB_WORKSPACE/scripts/versionsync.py pull obol --init
           cp -r ../obol/bin obol-bin
         if: ${{ !steps.restore-obol-cache.outputs.cache-hit }}
@@ -225,6 +254,3 @@ jobs:
           path: _build/default/_doc/_html
           if-no-files-found: error
         if: runner.os == 'linux' && github.ref == 'refs/heads/main'
-
-      - name: Opam Cleanup
-        run: opam clean -a -r

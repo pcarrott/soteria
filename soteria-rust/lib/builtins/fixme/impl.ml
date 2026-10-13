@@ -13,7 +13,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
      https://doc.rust-lang.org/src/std/panicking.rs.html#557-565 *)
   let cleanup ~payload =
     let ptr = Typed.Ptr.ptr_of payload in
-    let* usize_size = Layout.size_of (TLiteral (TUInt Usize)) in
+    let* usize_size = Layout.size_of (TScalar (TInteger (Unsigned Usize))) in
     let@ () = with_alloc_kind ~kind:(VTable Charon.TypesUtils.mk_unit_ty) in
     let* vtable =
       State.alloc_untyped ~zeroed:true
@@ -25,7 +25,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
     let* () = State.store vtable Charon_util.unit_ptr drop_fn in
     let vtable = Typed.Ptr.ptr_of vtable in
     let* align_ptr =
-      Sptr.offset ~ty:(TLiteral (TUInt Usize)) ~check_signed:true
+      Sptr.offset ~ty:(TScalar (TInteger (Unsigned Usize))) ~check_signed:true
         Usize.(2s)
         vtable
     in

@@ -6,6 +6,9 @@
          soteria-rust COMMAND …
   
   COMMANDS
+         auto [OPTION]… PATH
+             Run bi-abduction
+  
          build-plugins [OPTION]…
              Build plugins
   
@@ -70,6 +73,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -82,8 +89,18 @@
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
   
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
+  
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -149,6 +166,16 @@
          --kani
              Use the Kani library
   
+         --lib
+             Analyse the library's unit tests in [src/]. By default, the
+             crate's source is analysed, not the tests. Mutually exclusive with
+             --test.
+  
+         --libtest
+             When analysing a test target (--test or --lib), also discover the
+             crate's ordinary #[test] functions, not just Soteria's own
+             harnesses (#[soteria::test]). Has no effect when analysing source.
+  
          --log-compilation
              Log the compilation process
   
@@ -177,8 +204,10 @@
              Additional flags to pass to the Rustc compiler
   
          --sysroot=VAL (absent RUST_SYSROOT env)
-             The sysroot to use for compilation. If not provided, the default
-             sysroot is used.
+             The sysroot to use for compilation. If not provided, a sysroot is
+             set up automatically (building it if needed), so that the bodies
+             of all std functions are available for analysis. Pass [--sysroot
+             default] to opt out and use rustc's default sysroot instead.
   
          --target=VAL (absent TARGET env)
              The compilation target triple to use, e.g.
@@ -186,9 +215,10 @@
              the current machine is used.
   
          --test=VAL
-             The test profile to use to compile the crate; this only has an
-             effect if analysing a crate. Use [lib] for unit tests in [src/].
-             By default, the crate's source is analysed, not the tests.
+             The integration-test target to compile and analyse (a file in
+             [tests/]); this only has an effect if analysing a crate. By
+             default, the crate's source is analysed, not the tests. Mutually
+             exclusive with --lib.
   
   ANALYSIS OPTIONS
          --approx-floating-ops=ENUM (absent=warn)
@@ -290,6 +320,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -299,6 +332,9 @@
          SOTERIA_OFFLINE
              See option --offline.
   
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
+  
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
   
@@ -307,6 +343,9 @@
   
          SOTERIA_RUST_PLUGINS
              See option --plugins.
+  
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
   
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.
@@ -359,6 +398,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -371,8 +414,18 @@
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
   
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
+  
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -438,6 +491,16 @@
          --kani
              Use the Kani library
   
+         --lib
+             Analyse the library's unit tests in [src/]. By default, the
+             crate's source is analysed, not the tests. Mutually exclusive with
+             --test.
+  
+         --libtest
+             When analysing a test target (--test or --lib), also discover the
+             crate's ordinary #[test] functions, not just Soteria's own
+             harnesses (#[soteria::test]). Has no effect when analysing source.
+  
          --log-compilation
              Log the compilation process
   
@@ -466,8 +529,10 @@
              Additional flags to pass to the Rustc compiler
   
          --sysroot=VAL (absent RUST_SYSROOT env)
-             The sysroot to use for compilation. If not provided, the default
-             sysroot is used.
+             The sysroot to use for compilation. If not provided, a sysroot is
+             set up automatically (building it if needed), so that the bodies
+             of all std functions are available for analysis. Pass [--sysroot
+             default] to opt out and use rustc's default sysroot instead.
   
          --target=VAL (absent TARGET env)
              The compilation target triple to use, e.g.
@@ -475,9 +540,10 @@
              the current machine is used.
   
          --test=VAL
-             The test profile to use to compile the crate; this only has an
-             effect if analysing a crate. Use [lib] for unit tests in [src/].
-             By default, the crate's source is analysed, not the tests.
+             The integration-test target to compile and analyse (a file in
+             [tests/]); this only has an effect if analysing a crate. By
+             default, the crate's source is analysed, not the tests. Mutually
+             exclusive with --lib.
   
   ANALYSIS OPTIONS
          --approx-floating-ops=ENUM (absent=warn)
@@ -576,6 +642,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -585,6 +654,9 @@
          SOTERIA_OFFLINE
              See option --offline.
   
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
+  
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
   
@@ -593,6 +665,9 @@
   
          SOTERIA_RUST_PLUGINS
              See option --plugins.
+  
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
   
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.
@@ -644,6 +719,10 @@
          --compact (absent SOTERIA_COMPACT_DIAGNOSTICS env)
              Make diagnostic outputs compact.
   
+         --coverage-format=ENUM (absent=json or SOTERIA_COVERAGE_FORMAT env)
+             Coverage output format. Options are "json", "cobertura", and
+             "lcov".
+  
          --dump-callgraph=VAL
              If provided, dump the call graph as a DOT file to the given path
              after analysis.
@@ -656,8 +735,18 @@
              stdout, so the output can be piped directly into e.g. [jq]. Only
              active in [exec] and [compile] modes.
   
+         --output-coverage=VAL, --dump-coverage=VAL, --coverage=VAL (absent
+         SOTERIA_OUTPUT_COVERAGE env)
+             If coverage should be output. If the value is "stdout", prints the
+             coverage report to stdout; otherwise, stores it in the specified
+             file.
+  
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -723,6 +812,16 @@
          --kani
              Use the Kani library
   
+         --lib
+             Analyse the library's unit tests in [src/]. By default, the
+             crate's source is analysed, not the tests. Mutually exclusive with
+             --test.
+  
+         --libtest
+             When analysing a test target (--test or --lib), also discover the
+             crate's ordinary #[test] functions, not just Soteria's own
+             harnesses (#[soteria::test]). Has no effect when analysing source.
+  
          --log-compilation
              Log the compilation process
   
@@ -751,8 +850,10 @@
              Additional flags to pass to the Rustc compiler
   
          --sysroot=VAL (absent RUST_SYSROOT env)
-             The sysroot to use for compilation. If not provided, the default
-             sysroot is used.
+             The sysroot to use for compilation. If not provided, a sysroot is
+             set up automatically (building it if needed), so that the bodies
+             of all std functions are available for analysis. Pass [--sysroot
+             default] to opt out and use rustc's default sysroot instead.
   
          --target=VAL (absent TARGET env)
              The compilation target triple to use, e.g.
@@ -760,9 +861,10 @@
              the current machine is used.
   
          --test=VAL
-             The test profile to use to compile the crate; this only has an
-             effect if analysing a crate. Use [lib] for unit tests in [src/].
-             By default, the crate's source is analysed, not the tests.
+             The integration-test target to compile and analyse (a file in
+             [tests/]); this only has an effect if analysing a crate. By
+             default, the crate's source is analysed, not the tests. Mutually
+             exclusive with --lib.
   
   ANALYSIS OPTIONS
          --approx-floating-ops=ENUM (absent=warn)
@@ -865,6 +967,9 @@
          SOTERIA_COMPACT_DIAGNOSTICS
              See option --compact.
   
+         SOTERIA_COVERAGE_FORMAT
+             See option --coverage-format.
+  
          SOTERIA_FLAMEGRAPHS
              See option --flamegraphs.
   
@@ -874,6 +979,9 @@
          SOTERIA_OFFLINE
              See option --offline.
   
+         SOTERIA_OUTPUT_COVERAGE
+             See option --output-coverage.
+  
          SOTERIA_OUTPUT_STATS
              See option --output-stats.
   
@@ -882,6 +990,9 @@
   
          SOTERIA_RUST_PLUGINS
              See option --plugins.
+  
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
   
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.

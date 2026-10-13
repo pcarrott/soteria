@@ -35,11 +35,15 @@ jobs:
           dune-cache: false
           opam-pin: false
 
+      # Only saved from main, see build.yml.
       - name: Restore opam cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        id: restore-opam-cache
         with:
           path: _opam
           key: ${{ runner.os }}-${{ runner.arch }}-opam-testlib-${{ env.OCAML_VERSION }}-${{ hashFiles('soteria/*.opam') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-opam-testlib-${{ env.OCAML_VERSION }}-
 
       - name: Update opam
         run: |
@@ -67,6 +71,15 @@ jobs:
       # The command opam CI actually runs
       - name: Install soteria with tests and docs
         run: opam install ./pkg/soteria.opam --with-test --with-doc -y
+
+      - name: Opam Cleanup
+        run: opam clean -a -r
+      - name: Save opam cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #[actionpin: v5]
+        if: github.ref == 'refs/heads/main' && steps.restore-opam-cache.outputs.cache-hit != 'true'
+        with:
+          path: _opam
+          key: ${{ steps.restore-opam-cache.outputs.cache-primary-key }}
 
       - name: Assert build tools came from the opam switch
         run: |
@@ -101,6 +114,3 @@ jobs:
       - name: Build test project
         working-directory: tmp
         run: opam exec -- dune build
-
-      - name: Opam Cleanup
-        run: opam clean -a -r

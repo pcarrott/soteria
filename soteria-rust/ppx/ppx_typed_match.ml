@@ -31,7 +31,7 @@ open Ppxlib
     subject, the rest are matched as-is:
     {[
     match%ty (v, to_ty) with
-    | TBitVector _, TLiteral _ -> f v (* v : [< T.sint ] t; to_ty untouched *)
+    | TBitVector _, TScalar _ -> f v (* v : [< T.sint ] t; to_ty untouched *)
     | _, _ -> g v
     ]} *)
 

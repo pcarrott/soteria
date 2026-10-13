@@ -35,13 +35,16 @@ Try creating a generic vec
   Compiling... done in <time>
   => Running vec::with_capacity_wrong...
   error: vec::with_capacity_wrong: found issues in <time>, errors in 1 branch (out of 2)
-  error: Panic: core::panicking::panic in vec::with_capacity_wrong
-      --> vec.rs:6:12
+  error: Panic: assertion failed: my_vec.capacity() == 10 in vec::with_capacity_wrong
+      --> vec.rs:6:4
     3 |    #[soteria::test]
     4 | /  fn with_capacity_wrong<T>() {
     5 | |      let my_vec: Vec<T> = Vec::with_capacity(10);
     6 | |      assert!(my_vec.capacity() == 10);
-      | |             ^^^^^^^^^^^^^^^^^^^^^^^ Triggering operation
+      | |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      | |     |
+      | |     Triggering operation
+      | |     2: Call trace
       | \---------------------------------------' 1: Entry point
     7 |    }
   PC 1: (0x0000000000000000 == V|1|) /\ (0x0000000000000000 == V|1|)
@@ -84,13 +87,13 @@ Try const generics
   
   => Running const_generics::test_poly_const_generic2...
   note: const_generics::test_poly_const_generic2: done in <time>, ran 6 branches
-  PC 1: (0x0000000000000000 == V|1|) /\ (0x0000000000000000 == V|1|)
-  PC 2: (0x0000000000000001 == V|1|) /\ (0x0000000000000001 == V|1|)
-  PC 3: (V|1| == 0x0000000000000008) /\ (V|1| == 0x0000000000000008)
-  PC 4: (V|1| == 0x000000000000000f) /\ (V|1| == 0x000000000000000f)
-  PC 5: (V|1| == 0x00000000000000ff) /\ (V|1| == 0x00000000000000ff)
-  PC 6: (0x0000000000000002 <=u V|1|) /\ (V|1| != 0x0000000000000008) /\
+  PC 1: (0x0000000000000002 <=u V|1|) /\ (V|1| != 0x0000000000000008) /\
         (V|1| != 0x000000000000000f) /\ (V|1| != 0x00000000000000ff)
+  PC 2: (V|1| == 0x00000000000000ff) /\ (V|1| == 0x00000000000000ff)
+  PC 3: (V|1| == 0x000000000000000f) /\ (V|1| == 0x000000000000000f)
+  PC 4: (V|1| == 0x0000000000000008) /\ (V|1| == 0x0000000000000008)
+  PC 5: (0x0000000000000001 == V|1|) /\ (0x0000000000000001 == V|1|)
+  PC 6: (0x0000000000000000 == V|1|) /\ (0x0000000000000000 == V|1|)
   
 Test generating nondeterministic values of type T
   $ soteria-rust exec nondet_t.rs --frontend charon --poly
@@ -169,6 +172,8 @@ Test linked lists, to ensure dropping the list works despite the generic type
         ((0b000 == extract[0-2](V|1|)) || (V|1| <=s (0x0000000000000010 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))))) /\
         ((0b000 == extract[0-2](V|1|)) ? ((0b000 == extract[0-2](V|1|)) || (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) <=s (0x0000000000000008 +cks V|1|))) : ((0b000 != extract[0-2](V|1|)) || (V|1| <=s (0x0000000000000008 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))))) /\
         ((0b000 == extract[0-2](V|1|)) ? ((0b000 == extract[0-2](V|1|)) || (V|1| <s (0x0000000000000008 +ck ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))))) : ((0b000 != extract[0-2](V|1|)) || (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) <s (0x0000000000000008 +ck V|1|)))) /\
+        ((0b000 == extract[0-2](V|1|)) || (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) != 0xfffffffffffffff0)) /\
+        ((0b000 == extract[0-2](V|1|)) || (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) != 0xfffffffffffffff0)) /\
         (0x0000000000000001 <=u V|1|) /\ (V|1| <=u 0x00000000000003ff) /\
         (0b0000000000000000000000000000000000000000000000000000000000001 <=u V|2|) /\
         ((((0b000 == extract[0-2](V|1|)) || (0b000 == extract[0-2](((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))))) ? ((0b000 == extract[0-2](V|1|)) ? (0x0000000000000010 +cks V|1|) : (0x0000000000000010 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))) : ((0x0000000000000018 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))) - extend[u61](extract[0-2](((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))))) == ((0b000 == extract[0-2](V|1|)) ? (0x0000000000000010 +ck V|1|) : (0x0000000000000010 +ck ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))))

@@ -59,7 +59,9 @@ Deallocating memory that is strongly protected by an interior mutable reference 
   Compiling... done in <time>
   => Running cell_dealloc::main...
   note: cell_dealloc::main: done in <time>, ran 1 branch
-  PC 1: empty
+  PC 1: ((V|1| ++ 0b00) <u 0x7ffffffffffffffb) /\
+        (0x0000000000000004 <=u (V|1| ++ 0b00)) /\
+        (0b00000000000000000000000000000000000000000000000000000000000001 <=u V|1|)
   
 
 Deallocating memory that is strongly protected by a mutable reference is not
@@ -68,14 +70,29 @@ Deallocating memory that is strongly protected by a mutable reference is not
   => Running protected_dealloc::main...
   error: protected_dealloc::main: found issues in <time>, errors in 1 branch (out of 1)
   bug: Tried freeing an allocation which was passed to a function by reference in protected_dealloc::main
-       --> $RUSTLIB/library/alloc/src/alloc.rs:175:14
-   175 |        unsafe { __rust_dealloc(ptr, layout.size(), layout.alignment()) }
+       --> $RUSTLIB/library/alloc/src/alloc.rs:178:14
+   178 |        unsafe { __rust_dealloc(ptr, layout.size(), layout.alignment()) }
        |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
        |                 |
        |                 Freeing memory
-       |                 10: Call trace
-       --> $RUSTLIB/library/alloc/src/boxed.rs:2000:17
-  2000 |                    self.1.deallocate(From::from(ptr.cast()), layout);
+       |                 13: Call trace
+       .    
+   327 |                unsafe { dealloc_nonnull(ptr, layout) }
+       |                         ---------------------------- 12: Call trace
+       .    
+   441 |        const unsafe fn deallocate_impl(&self, ptr: NonNull<u8>, layout: Layout) {
+   442 | /          core::intrinsics::const_eval_select(
+   443 | |              (ptr, layout),
+   444 | |              Global::deallocate_impl_const,
+   445 | |              Global::deallocate_impl_runtime,
+   446 | |          )
+       | \----------' 11: Call trace
+   447 |        }
+       .    
+   561 |            unsafe { self.deallocate_impl(ptr, layout) }
+       |                     --------------------------------- 10: Call trace
+       --> $RUSTLIB/library/alloc/src/boxed.rs:2014:17
+  2014 |                    self.1.deallocate(From::from(ptr.cast()), layout);
        |                    ------------------------------------------------- 9: Call trace
        --> $RUSTLIB/library/core/src/mem/mod.rs:1049:1
   1049 |    }
@@ -83,13 +100,13 @@ Deallocating memory that is strongly protected by a mutable reference is not
        --> $RUSTLIB/library/core/src/ops/function.rs:250:5
    250 |        extern "rust-call" fn call_once(self, args: Args) -> Self::Output;
        |        ------------------------------------------------------------------ 5: Call trace
-       --> $RUSTLIB/library/core/src/ptr/mod.rs:847:1
-   846 |    #[lang = "drop_glue"]
-   847 | /  pub(crate) const unsafe fn drop_glue<T: PointeeSized>(_: &mut T)
-   848 | |  where
-   849 | |      T: [const] Destruct,
+       --> $RUSTLIB/library/core/src/ptr/mod.rs:848:1
+   847 |    #[lang = "drop_glue"]
+   848 | /  pub(crate) const unsafe fn drop_glue<T: PointeeSized>(_: &mut T)
+   849 | |  where
+   850 | |      T: [const] Destruct,
        | \-------------------------' 8: Call trace
-   850 |    {
+   851 |    {
        --> $TESTCASE_ROOT/protected-dealloc.rs:9:9
      4 |        f(x)
        |        ---- 3: Call trace
@@ -103,7 +120,9 @@ Deallocating memory that is strongly protected by a mutable reference is not
     10 | |      });
        | \-------' 2: Call trace
     11 |    }
-  PC 1: empty
+  PC 1: ((V|1| ++ 0b00) <u 0x7ffffffffffffffb) /\
+        (0x0000000000000004 <=u (V|1| ++ 0b00)) /\
+        (0b00000000000000000000000000000000000000000000000000000000000001 <=u V|1|)
   
   [1]
 

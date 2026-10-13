@@ -46,7 +46,8 @@ value of type [int]. Again, this is a symbolic process, so it is
 {{!Soteria.Symex.S.run}[run]} function:
 {@ocaml[
   # Symex.run
-  - : ?flamegraph:string Soteria_std.Effects.Bookkeeping.mode ->
+  - : ?coverage:unit Soteria_std.Effects.Bookkeeping.mode ->
+      ?flamegraph:string Soteria_std.Effects.Bookkeeping.mode ->
       ?stats:unit Soteria_std.Effects.Bookkeeping.mode ->
       ?fuel:Symex.Fuel_gauge.t ->
       mode:Symex.Approx.t -> 'a Symex.t -> ('a * Typed.Expr.t list) list

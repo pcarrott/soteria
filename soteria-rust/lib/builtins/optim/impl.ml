@@ -85,7 +85,7 @@ module M (StateM : State.StateM.S) : Intf.M(StateM).S = struct
   let align_offset ~t ~p ~a:tgt_align =
     let ( let/ ) x f = bind (function Some x -> ok x | None -> f ()) x in
 
-    let usize_max = Typed.BV.usize (Layout.max_value_z (TUInt Usize)) in
+    let usize_max = Typed.BV.usize (Layout.max_value_z (Unsigned Usize)) in
     let* stride = Layout.size_of t in
     let ptr = Typed.Ptr.ptr_of p in
     let ofs = Typed.Ptr.ofs ptr in

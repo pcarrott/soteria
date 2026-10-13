@@ -26,7 +26,7 @@ module M (StateM : State.StateM.S) = struct
       | [ size ] -> Typed.cast_i Usize size
       | _ -> failwith "malloc: invalid arguments"
     in
-    let max_size = Typed.BitVec.usize (Layout.max_value_z (TInt Isize)) in
+    let max_size = Typed.BitVec.usize (Layout.max_value_z (Signed Isize)) in
     let* () = assert_ (size <=@ max_size) `InvalidAlloc in
     (* UX: the alignment can be smaller (its min size is the first power of 2
        greater than or equal to the requested size) *)

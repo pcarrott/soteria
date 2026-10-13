@@ -180,8 +180,8 @@ module type S = sig
       (Typed.block Iter.t, 'env) monad
 
     val cast_literal :
-      from_ty:Values.literal_type ->
-      to_ty:Values.literal_type ->
+      from_ty:Values.scalar_type ->
+      to_ty:Values.scalar_type ->
       [< sint | sfloat ] v ->
       [> sint | sfloat ] v
 
@@ -503,7 +503,7 @@ module Make (State : State_intf.S) :
     let[@inline] unsize_path ~from_ty ~to_ty =
       lift_err (unsize_path ~from_ty ~to_ty)
 
-    let[@inline] normalise ty = lift_err (normalise ty)
+    let[@inline] normalise ty = lift_symex (normalise ty)
   end
 
   module Value_codec = struct

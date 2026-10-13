@@ -24,9 +24,9 @@ let uint_ty_of_size : int -> Values.u_int_ty = function
   | 1 -> U8
   | size -> L.failwith "uint_ty_of_size: no unsigned type of size %d" size
 
-let size_of_literal_ty : Types.literal_type -> int = function
-  | TInt int_ty -> size_of_int_ty int_ty
-  | TUInt uint_ty -> size_of_uint_ty uint_ty
+let size_of_literal_ty : Types.scalar_type -> int = function
+  | TInteger (Signed int_ty) -> size_of_int_ty int_ty
+  | TInteger (Unsigned uint_ty) -> size_of_uint_ty uint_ty
   | TBool -> 1
   | TChar -> 4
   | TFloat F16 -> 2
@@ -34,54 +34,40 @@ let size_of_literal_ty : Types.literal_type -> int = function
   | TFloat F64 -> 8
   | TFloat F128 -> 16
 
-let[@inline] is_signed : Types.literal_type -> bool = [%matches? TInt _]
+let[@inline] is_signed : Types.scalar_type -> bool =
+  [%matches? TInteger (Signed _)]
 
-let z_of_scalar : Values.scalar_value -> Z.t = function
-  | SignedScalar (ty, v) when Z.lt v Z.zero ->
+let z_of_scalar : Values.integer_value -> Z.t = function
+  | SignedInteger (ty, v) when Z.lt v Z.zero ->
       let bits = size_of_int_ty ty * 8 in
       Z.(v land pred (one lsl bits))
-  | UnsignedScalar (_, v) | SignedScalar (_, v) -> v
-
-let z_of_literal : Values.literal -> Z.t = function
-  | VScalar s -> z_of_scalar s
-  | VBool b -> if b then Z.one else Z.zero
-  | VChar c -> Z.of_int @@ Uchar.to_int c
-  | VFloat _ | VByteStr _ | VStr _ -> L.failwith "z_of_literal: not an int"
+  | UnsignedInteger (_, v) | SignedInteger (_, v) -> v
 
 let type_of_operand : Expressions.operand -> Types.ty = function
   | Constant c -> c.ty
   | Copy p | Move p -> p.ty
 
-let lit_to_string = Print.literal_type_to_string
+let lit_to_string = Print.scalar_type_to_string
 
 let ty_as_float : Types.ty -> Values.float_type = function
-  | TLiteral (TFloat f) -> f
+  | TScalar (TFloat f) -> f
   | _ -> L.failwith "ty_as_float: not a float type"
 
-let pp_literal_ty = Fmt.of_to_string Print.literal_type_to_string
+let pp_literal_ty = Fmt.of_to_string Print.scalar_type_to_string
 
-let lit_of_int_ty : Types.integer_type -> Types.literal_type = function
-  | Signed ity -> TInt ity
-  | Unsigned uty -> TUInt uty
+let lit_of_int_ty : Types.integer_type -> Types.scalar_type =
+ fun ity -> TInteger ity
 
-let lit_of_scalar : Values.scalar_value -> Types.literal_type = function
-  | SignedScalar (ity, _) -> TInt ity
-  | UnsignedScalar (uty, _) -> TUInt uty
+let lit_of_scalar : Values.integer_value -> Types.scalar_type = function
+  | SignedInteger (ity, _) -> TInteger (Signed ity)
+  | UnsignedInteger (uty, _) -> TInteger (Unsigned uty)
 
-let lit_ty_of_lit : Values.literal -> Types.literal_type = function
-  | VScalar s -> lit_of_scalar s
-  | VBool _ -> TBool
-  | VChar _ -> TChar
-  | VFloat { float_ty; _ } -> TFloat float_ty
-  | VStr _ | VByteStr _ -> L.failwith "lit_ty_of_lit: not a literal type"
-
-let int_ty_of_lit_ty : Types.literal_type -> Types.integer_type = function
-  | TInt ity -> Signed ity
-  | TUInt uty -> Unsigned uty
+let int_ty_of_lit_ty : Types.scalar_type -> Types.integer_type = function
+  | TInteger ity -> ity
   | _ -> L.failwith "int_ty_of_lit_ty: not an int literal"
 
 let z_of_constant_expr : Types.constant_expr -> Z.t = function
-  | { kind = CLiteral (VScalar s); _ } -> z_of_scalar s
+  | { kind = CInteger s; _ } -> z_of_scalar s
   | cg ->
       L.failwith "int_of_const_generic: unhandled const: %a"
         Types.pp_constant_expr cg
@@ -105,12 +91,12 @@ let rec pp_ty fmt : Types.ty -> unit = function
       Fmt.pf fmt "(%a)"
         (Fmt.list ~sep:(Fmt.any ", ") pp_ty)
         (Crate.as_struct_tys tref)
-  | TArray (ty, { kind = CLiteral (VScalar len); _ }) ->
+  | TArray (ty, { kind = CInteger len; _ }, _) ->
       Fmt.pf fmt "[%a; %a]" pp_ty ty Z.pp_print (z_of_scalar len)
-  | TArray (ty, _) -> Fmt.pf fmt "[%a; ?]" pp_ty ty
-  | TSlice ty -> Fmt.pf fmt "[%a]" pp_ty ty
+  | TArray (ty, _, _) -> Fmt.pf fmt "[%a; ?]" pp_ty ty
+  | TSlice (ty, _) -> Fmt.pf fmt "[%a]" pp_ty ty
   | TAdt { builtin = Some TStr; _ } -> Fmt.string fmt "str"
-  | TLiteral lit -> pp_literal_ty fmt lit
+  | TScalar lit -> pp_literal_ty fmt lit
   | TNever -> Fmt.string fmt "!"
   | TRef (_, ty, RMut) -> Fmt.pf fmt "&mut %a" pp_ty ty
   | TRef (_, ty, RShared) -> Fmt.pf fmt "&%a" pp_ty ty
@@ -125,7 +111,7 @@ let rec pp_ty fmt : Types.ty -> unit = function
   | TTraitType (tref, type_id, _) ->
       Fmt.pf fmt "Trait<%a>::%s" Crate.pp_trait_ref tref
         (Crate.get_assoc_type_name tref type_id)
-  | TFnDef { binder_value = { kind = FunId (FRegular fid); _ }; _ } ->
+  | TFnDef { binder_value = { kind = Fun fid; _ }; _ } ->
       let f = Crate.get_fun fid in
       Fmt.pf fmt "fn %a" Crate.pp_name f.item_meta.name
   | TPtrMetadata ty -> Fmt.pf fmt "meta(%a)" pp_ty ty
@@ -172,8 +158,9 @@ let mk_array_ty ty len : Types.ty =
     ( ty,
       {
         ty = TypesUtils.mk_usize_ty;
-        kind = CLiteral (VScalar (UnsignedScalar (Usize, len)));
-      } )
+        kind = CInteger (UnsignedInteger (Usize, len));
+      },
+      None )
 
 (** The type [*const ()] *)
 let unit_ptr = Types.TRawPtr (TypesUtils.mk_unit_ty, RShared)
@@ -182,7 +169,7 @@ let unit_ptr = Types.TRawPtr (TypesUtils.mk_unit_ty, RShared)
 let unit_ref = Types.TRef (RErased, TypesUtils.mk_unit_ty, RShared)
 
 (** The type [u8] *)
-let u8_ty = Types.TLiteral (TUInt U8)
+let u8_ty = Types.TScalar (TInteger (Unsigned U8))
 
 let mk_sig ?(is_unsafe = false) ?(is_variadic = false) ?(abi = Types.AbiRust)
     inputs output : Types.fun_sig =
@@ -217,7 +204,7 @@ let rec get_pointee : Types.ty -> Types.ty = function
   | TAdt { generics = { types = [ ty ]; _ }; builtin = Some TBox; _ } ->
       ty
   | TPattern (ty, _) -> get_pointee ty
-  | TAdt adt when adt_is_box adt -> (
+  | TAdt ({ builtin = Some TBox; _ } as adt) -> (
       if (Config.get ()).polymorphic then List.hd adt.generics.types
       else
         let adt = Crate.get_adt adt in

@@ -1,4 +1,5 @@
 open Soteria.Soteria_std.Cmdliner_helpers
+open Soteria_rust_lib
 open Cmdliner
 
 let exits =
@@ -16,11 +17,7 @@ let dir_arg =
     & info [] ~doc:"The .rs file or the directory of the crate to analyse")
 
 module Exec = struct
-  let term =
-    Term.(
-      const Soteria_rust_lib.Driver.exec_wpst
-      $ Soteria_rust_lib.Config.global_term
-      $ dir_arg)
+  let term = Term.(const Driver.exec_wpst $ Config.global_term $ dir_arg)
 
   let cmd =
     Cmd.make
@@ -35,6 +32,24 @@ module Exec = struct
                 for all entrypoints and execute them symbolically.";
            ]
          "exec")
+      term
+end
+
+module Auto = struct
+  let term = Term.(const Driver.exec_biab $ Config.global_term $ dir_arg)
+
+  let cmd =
+    Cmd.make
+      (Cmd.info ~exits ~doc:"Run bi-abduction"
+         ~man:
+           [
+             `S Cmdliner.Manpage.s_description;
+             `P
+               "Perform bi-abduction on the specified file or crate; will \
+                analyse all functions compositionally, and look for reachable \
+                bugs.";
+           ]
+         "auto")
       term
 end
 
@@ -65,10 +80,7 @@ module Compile = struct
 end
 
 module Build_plugins = struct
-  let term =
-    Term.(
-      const Soteria_rust_lib.Driver.build_plugins
-      $ Soteria_rust_lib.Config.global_term)
+  let term = Term.(const Driver.build_plugins $ Config.global_term)
 
   let cmd =
     Cmd.make
@@ -112,7 +124,7 @@ end
 let cmd =
   Cmd.group
     (Cmd.info ~exits ~version:Soteria.Version.version "soteria-rust")
-    [ Exec.cmd; Compile.cmd; Build_plugins.cmd; Version.cmd ]
+    [ Exec.cmd; Compile.cmd; Auto.cmd; Build_plugins.cmd; Version.cmd ]
 
 let () =
   (* Trade extra memory for better performance (~2% across benchmarks) *)

@@ -33,7 +33,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       let sub = Typed.Infix.( -!!@ )
 
       let is_in_bound (v : t) : sbool Typed.t =
-        let max = Layout.max_value_z (TInt Isize) in
+        let max = Layout.max_value_z (Signed Isize) in
         let max = Typed.BitVec.usize max in
         v <=@ max
 
@@ -266,7 +266,6 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       (* we're basically guaranteed these won't error (ie. layout error) by now,
          so we can safely unwrap. *)
       let*^ ty = Layout.normalise ty in
-      let ty = get_ok ty in
       let*^ layout = Layout.layout_of ty in
       let layout = get_ok layout in
       let+^ v = Value_codec.nondet_valid ty in

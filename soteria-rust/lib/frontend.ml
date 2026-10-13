@@ -12,18 +12,6 @@ exception CompilationError of string * string
 let compilation_err info msg = raise (CompilationError (info, msg))
 
 module Lib = struct
-  let target =
-    lazy
-      (match (Config.get ()).target with
-      | Some t -> t
-      | None -> (
-          let env = Cmd.rustc_as_env () in
-          let info = Exe.exec_exn ~env (Cmd.cargo ()) [ "-vV" ] in
-          match List.find_opt (String.starts_with ~prefix:"host") info with
-          | Some s -> String.sub s 6 (String.length s - 6)
-          | None ->
-              compilation_err "executing rustc" "Couldn't find target host"))
-
   let root =
     lazy
       (match
@@ -63,8 +51,8 @@ module Lib = struct
   (** Deletes the target directory of a target, to avoid duplicate builds *)
   let clean lib = ignore (exec_cargo lib [ "clean" ])
 
-  (** A target Cargo built, and the files it emitted for it. *)
-  type artifact = { name : string; files : string list }
+  (** A target Cargo built, its kinds, and the files it emitted for it. *)
+  type artifact = { name : string; kinds : string list; files : string list }
 
   (** The artifacts Cargo built, as listed by the [compiler-artifact] messages
       of its JSON output.
@@ -74,7 +62,7 @@ module Lib = struct
       {[
       {
         "reason": "compiler-artifact",
-        "target": { "name": "plugin", ... },
+        "target": { "name": "plugin", "kind": [ "lib" ], ... },
         "filenames": [
           "/path/to/plugin/target/<target>/debug/libplugin.rlib",
           "/path/to/plugin/target/<target>/debug/build/plugin/<hash>/out/libplugin-<hash>.rmeta"
@@ -96,6 +84,7 @@ module Lib = struct
     |> Iter.map (fun json ->
         {
           name = json $ "target" $ "name" |> to_string;
+          kinds = json $ "target" $ "kind" |> to_list |> filter_string;
           files = json $ "filenames" |> to_list |> filter_string;
         })
     |> Iter.to_list
@@ -106,19 +95,32 @@ module Lib = struct
     let artifact =
       List.find (fun a -> String.equal a.name (name lib)) artifacts
     in
-    let rlib =
-      List.find (fun f -> Filename.check_suffix f ".rlib") artifact.files
+    let externs =
+      artifact.files
+      |> List.filter (fun f ->
+          Filename.check_suffix f ".rlib" || Filename.check_suffix f ".rmeta")
+      |> List.concat_map (fun f -> [ "--extern"; name lib ^ "=" ^ f ])
+    in
+    let is_dependency a =
+      (not (String.equal a.name (name lib)))
+      && List.exists
+           (fun k -> List.mem k [ "lib"; "rlib"; "proc-macro" ])
+           a.kinds
     in
     let search_dirs =
       artifacts
+      |> List.filter is_dependency
       |> List.concat_map (fun a -> a.files)
-      |> List.map (fun dir -> "-L" ^ Filename.dirname dir)
+      |> List.map Filename.dirname
+      |> List.sort_uniq String.compare
+      |> List.concat_map (fun dir -> [ "-L"; "dependency=" ^ dir ])
     in
-    [ "--extern"; name lib ^ "=" ^ rlib ] @ search_dirs
+    externs @ search_dirs
 
   (** File used to cache the rustc flags of a library. Allows
       [--no-compile-plugins] to reuse the last build. *)
-  let flags_file lib = path lib / "target" / Lazy.force target / "soteria-flags"
+  let flags_file lib =
+    path lib / "target" / Lazy.force Cmd.target / "soteria-flags"
 
   (** Builds [lib] and returns the rustc flags to compile against it. If
       [--no-compile-plugins] is set, the build is skipped and the flags recorded
@@ -143,7 +145,7 @@ module Lib = struct
           "build";
           "--lib";
           "--target";
-          Lazy.force target;
+          Lazy.force Cmd.target;
           "--message-format=json-render-diagnostics";
         ]
         @ (if config.log_compilation then [ "--verbose" ] else [])
@@ -157,7 +159,7 @@ module Lib = struct
 
   let with_compiled lib f =
     let path = path lib in
-    let target = Lazy.force target in
+    let target = Lazy.force Cmd.target in
     let lib_imports = compile lib in
     let config : Cmd.t = f (path, target) in
     { config with rustc = config.rustc @ lib_imports }
@@ -194,9 +196,8 @@ let default () =
          "--format=postcard";
          "--no-typecheck";
          "--no-normalize";
-         (* Use the normal distributed sysroot; Charon otherwise defaults to a
-            full-MIR Miri sysroot, whose std is incompatible with our
-            separately-compiled [soteria] support crate. *)
+         "--hide-marker-traits";
+         (* Tell Charon to not specify any sysroot; we have our own *)
          "--sysroot=default";
        ]
       @ opaque_names
@@ -291,21 +292,24 @@ let create_using_current_config () : mk_cmd * entry_point_filter =
   in
   let cmd = List.fold_left Cmd.concat_cmd Cmd.empty cmd_parts in
   let cmd =
-    match config.test with
-    | None -> cmd
-    | Some _ ->
-        (* HACK: if we're in test mode, we want to ignore main because Rust will
-           compile it in a quirky way and it requires having a sysroot. Instead
-           we want to look for the tests directly! So we add #[test] *)
-        let entry_points =
-          Cmd.(entry (Attrib "test"))
-          :: List.filter
-               (function
-                 | Cmd.{ matcher = Pub | Name "main"; _ } -> false | _ -> true)
-               cmd.entry_points
-        in
-        let expect_error = Cmd.Attrib "should_panic" :: cmd.expect_error in
-        { cmd with entry_points; expect_error }
+    if Option.is_none config.test && not config.lib then cmd
+    else
+      (* HACK: in test mode (--test or --lib) we ignore main because Rust will
+         compile it in a quirky way and it requires having a sysroot. Instead we
+         look for the tests directly! *)
+      let test_attr =
+        if config.with_libtest then
+          [ Cmd.{ matcher = Attrib "test"; args = [] } ]
+        else []
+      in
+      let entry_points =
+        test_attr @ cmd.entry_points
+        |> List.filter (function
+          | Cmd.{ matcher = Cmd.Pub | Name "main"; _ } -> false
+          | _ -> true)
+      in
+      let expect_error = Cmd.Attrib "should_panic" :: cmd.expect_error in
+      { cmd with entry_points; expect_error }
   in
   let mk_cmd =
    fun ?input ~output () ->
@@ -372,10 +376,12 @@ let parse_ullbc_of_file ~(mk_cmd : mk_cmd) file_name =
 
 (** Given a Rust file, parse it into LLBC, using Charon. *)
 let parse_ullbc_of_crate ~(mk_cmd : mk_cmd) crate_dir =
+  let config = Config.get () in
   let filename =
-    match (Config.get ()).test with
-    | Some test -> "test-" ^ test ^ ".ullbc"
-    | None -> "crate.ullbc"
+    match (config.test, config.lib) with
+    | Some test, _ -> "test-" ^ test ^ ".ullbc"
+    | None, true -> "test-lib.ullbc"
+    | _ -> "crate.ullbc"
   in
   let output = crate_dir / filename in
   let cmd = mk_cmd ~output () in
