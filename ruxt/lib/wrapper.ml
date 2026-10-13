@@ -186,6 +186,12 @@ let exec ~fuel (wrapper : t) summs =
   State.SM.Result.run_with_state ~state:State.empty (wrapper.fn summs)
   |> Rustsymex.run ~stats:Caller ~mode:UX ~fuel
   |> Monad.ResultM.fold_list ~init:[] ~f:(fun summs -> function
+    (* Values that borrow from the arguments are not supported yet, as the
+       arguments are dropped after the call: no summary is inferred *)
+    | ( Compo_res.Ok
+          ((Types.TAdt { generics = { regions = _ :: _; _ }; _ }, _), _),
+        _ ) ->
+        Ok summs
     (* Successful termination: a new summary can been inferred *)
     | Compo_res.Ok ((ty, ret), state), pcs ->
         let open Result.Syntax in

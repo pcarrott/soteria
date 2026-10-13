@@ -8,15 +8,16 @@ module Typed = Svalue.Typed
 module State = struct
   include State.Tree_state.Make (Tree_borrows.Concrete.Make)
 
+  (* The location variables of a block, and the variables it points to *)
   let iter_vars syn =
     let ins, outs = ins_outs syn in
     let iter_vars_l l =
       Iter.of_list l |> Iter.flat_map StateKey.Svalue.iter_vars
     in
-    let ins, outs = (iter_vars_l ins, iter_vars_l outs) in
-    (* In our state representation, locations are single variables *)
-    assert (Iter.length ins = 1);
-    (Iter.head_exn ins, outs)
+    let is_loc (_, ty) = [%matches? Soteria.Bv_values.Svalue.TLoc _] ty in
+    let ins = Iter.persistent_lazy (iter_vars_l ins) in
+    ( Iter.filter is_loc ins,
+      Iter.append (Iter.filter (Fun.negate is_loc) ins) (iter_vars_l outs) )
 end
 
 module Logic = struct
@@ -97,19 +98,20 @@ end
 module Var_hashset = Var_graph.Node_set
 
 (* For each block $l -> B in the post state, we add a single-sided arrow from
-   the variable in $l to all variables contained in B.
+   the location variables in $l to all variables contained in B.
 
-   For each decayed pointer $l -> i, we add a double edge from the variable in
-   $l to all variables in i. *)
+   For each decayed pointer $l -> i, we add a double edge from the location
+   variables in $l to all variables in i. *)
 let add_block_edges graph spatial =
   ListLabels.iter spatial ~f:(fun syn ->
-      let (var, _), outs = State.iter_vars syn in
+      let locs, outs = State.iter_vars syn in
       let add_edge =
         match syn with
         | State.Ser_heap _ -> Var_graph.add_edge graph
         | State.Ser_pointers _ -> Var_graph.add_double_edge graph
       in
-      Iter.iter (fun (y, _) -> add_edge var y) outs)
+      Iter.product locs (Iter.persistent_lazy outs) (fun ((x, _), (y, _)) ->
+          add_edge x y))
 
 (* The variables reachable from the return value, following path condition
    equalities and the contents of the blocks of the post state. *)
@@ -142,8 +144,8 @@ let is_leak =
 let reachable_blocks_or_leaks ~reachable spatial =
   let kept, dropped =
     ListLabels.partition spatial ~f:(fun syn ->
-        let (var, _), _ = State.iter_vars syn in
-        Var_hashset.mem reachable var)
+        let locs, _ = State.iter_vars syn in
+        Iter.exists (fun (x, _) -> Var_hashset.mem reachable x) locs)
   in
   if (Config.get ()).ignore_leaks then Result.ok kept
   else
@@ -231,6 +233,8 @@ let implies ?names s_pre s_post =
   match Rustsymex.run ~stats:Caller ~mode:OX process with
   | [ (Soteria.Soteria_std.Compo_res.Ok (st, _), _) ] -> st = State.empty
   | _ -> false
+  (* If the check is not supported, conservatively keep both summaries *)
+  | exception Soteria.Symex.Gave_up _ -> false
 
 module Context = struct
   open Charon.Types
