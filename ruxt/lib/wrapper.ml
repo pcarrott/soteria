@@ -187,5 +187,11 @@ let exec ~fuel (wrapper : t) summs =
         let open Result.Syntax in
         let+ summ = Summary.make ret state pcs in
         (ty, summ) :: summs
+    (* Panics are safe, but they do not produce a summary either *)
+    | Compo_res.Error ((e, _), _), _
+      when [%matches?
+             `Panic _ | `PanicCheck _ | `FailedAssert _ | `UnwindTerminate]
+             e ->
+        Ok summs
     (* Unsuccessful termination: found a type unsoundness *)
     | _ -> Result.error `TypeUnsound)
