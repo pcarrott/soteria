@@ -153,6 +153,13 @@ type t = {
       [@env "SHOW_PCS"]
       (** Whether to show the path conditions for outcomes at the end of
           execution. *)
+  show_manifest_summaries : bool;
+      [@make.default false]
+      [@docs Sections.output]
+      [@names [ "show-manifest-summaries" ]]
+      [@env "SOTERIA_SHOW_MANIFEST_SUMMARIES"]
+      (** Print a corresponding manifest summary after the bug report if a bug
+          is found *)
   (* Symbolic execution behaviour *)
   ignore_leaks : bool;
       [@docs Sections.analysis]

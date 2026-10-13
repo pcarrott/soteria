@@ -6,6 +6,9 @@
          soteria-rust COMMAND …
   
   COMMANDS
+         auto [OPTION]… PATH
+             Run bi-abduction
+  
          build-plugins [OPTION]…
              Build plugins
   
@@ -94,6 +97,10 @@
   
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -337,6 +344,9 @@
          SOTERIA_RUST_PLUGINS
              See option --plugins.
   
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
+  
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.
   
@@ -412,6 +422,10 @@
   
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -652,6 +666,9 @@
          SOTERIA_RUST_PLUGINS
              See option --plugins.
   
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
+  
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.
   
@@ -726,6 +743,10 @@
   
          --output-crate
              Pretty-print the compiled crate to a file
+  
+         --show-manifest-summaries (absent SOTERIA_SHOW_MANIFEST_SUMMARIES env)
+             Print a corresponding manifest summary after the bug report if a
+             bug is found
   
          --show-pcs, --pcs (absent SHOW_PCS env)
              Whether to show the path conditions for outcomes at the end of
@@ -969,6 +990,9 @@
   
          SOTERIA_RUST_PLUGINS
              See option --plugins.
+  
+         SOTERIA_SHOW_MANIFEST_SUMMARIES
+             See option --show-manifest-summaries.
   
          SOTERIA_SOLVER_TIMEOUT
              See option --solver-timeout.

@@ -807,8 +807,9 @@ let rec nondet_raw :
   | (TRef (_, pointee, _) | TRawPtr (pointee, _))
     when not (Layout.is_dst pointee) ->
       let** { size; align; _ } = Layout.layout_of pointee in
-      let+ ptr = nondet (Typed.t_ptr ()) in
-      let ptr = Typed.Ptr.of_raw ~ptr ~size ~align ~tag:None in
+      let* loc = nondet (Typed.t_loc ()) in
+      let+ ofs = nondet (Typed.t_usize ()) in
+      let ptr = Typed.Ptr.mk_ptr_t ~loc ~ofs ~align ~size ~tag:None in
       Ok (Typed.Ptr.of_ptr_t ptr)
   | TArray (ty, len, _) ->
       let size = z_of_constant_expr len in
@@ -868,6 +869,21 @@ let nondet_valid ty =
   in
   v
 
+(** Whether a value of the given type may contain references or boxes, i.e.
+    whether {!ref_tys_in} may call its callback on it. Type variables are
+    conservatively assumed to contain references. *)
+let rec may_contain_refs : Types.ty -> bool = function
+  | TRef _ | TAdt { builtin = Some TBox; _ } -> true
+  | TAdt adt when Crate.is_struct adt ->
+      List.exists may_contain_refs (Crate.as_struct_tys adt)
+  | TAdt adt when Crate.is_enum adt ->
+      Crate.as_enum adt
+      |> List.exists (fun (var : Types.variant) ->
+          List.exists may_contain_refs (field_tys var.fields))
+  | TArray (ty, _, _) | TSlice (ty, _) | TPattern (ty, _) -> may_contain_refs ty
+  | TVar _ -> true
+  | _ -> false
+
 (** Folds over all the references and boxes in the given value and type,
     applying [fn] to them. This is used to update nested references when
     reborrowing. Calls [fn] with the pointer value and the pointer type (not the
@@ -923,7 +939,8 @@ let rec ref_tys_in
       let v = Typed.cast_array v in
       let++ vs, acc = fs init ty (Typed.Adt.as_array v) in
       (Typed.Adt.mk_array ty (Iarray.of_list vs), acc)
-  | TAdt adt when Crate.is_enum adt ->
+  | TAdt adt when Crate.is_enum adt && may_contain_refs ty ->
+      (* we avoid branching on the variant if there is nothing to update *)
       let v = Typed.cast_enum ~adt v in
       let* var = variant_for_enum v adt in
       let vs = Typed.Adt.as_enum_of_variant var.id v in

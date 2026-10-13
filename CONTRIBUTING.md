@@ -143,7 +143,7 @@ To use Soteria Rust, you need a frontend to translate Rust code to an intermedia
    <!-- [versionsync: CHARON_COMMIT_HASH=933b01f7dea4b5fc31603c3f1731c6b4fb571b06] -->
    ```sh
    cd ..
-   git clone https://github.com/soteria-tools/charon.git
+   git clone https://github.com/AeneasVerif/charon.git
    cd charon
    git checkout 933b01f7dea4b5fc31603c3f1731c6b4fb571b06
    ```

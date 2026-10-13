@@ -10,6 +10,8 @@ open Typed.Syntax
 open Typed.Infix
 open T
 
+type 'addr addr_raw = { address : 'addr; exposed : bool }
+
 (** A map to store information on "decayed" pointers, namely mapping from
     locations to integers (their decayed) value.
 
@@ -19,7 +21,9 @@ open T
     [from_exposed] is partial: if a provenance cannot be guessed from the
     integer, [None] is returned. *)
 module type DecayMapS = sig
-  include Soteria.Sym_states.Base.M(Rustsymex).S
+  include
+    Soteria.Sym_states.Base.M(Rustsymex).S
+      with type syn = Expr.t * Expr.t addr_raw
 
   module SM : sig
     include module type of SM
@@ -76,7 +80,7 @@ module DecayMap : DecayMapS = struct
   end
 
   module Entry = struct
-    type 'addr raw = { address : 'addr; exposed : bool }
+    type 'addr raw = 'addr addr_raw = { address : 'addr; exposed : bool }
     [@@deriving show { with_path = false }]
 
     type t = sint Typed.t raw [@@deriving show { with_path = false }]
