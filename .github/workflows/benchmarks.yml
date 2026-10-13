@@ -26,10 +26,10 @@ on:
 jobs:
   benchmarks:
     name: Run benchmarks
-    # The official Rust nightly image gives a fixed, reproducible toolchain
-    # and OS environment.
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Runs on a self-hosted Linux runner so we benchmark on stable hardware;
+    # the official Rust nightly image gives a fixed, reproducible toolchain
+    # and OS environment on top of it.
+    runs-on: [self-hosted, linux]
     container:
       image: rustlang/rust:nightly
     permissions:
@@ -43,7 +43,7 @@ jobs:
           apt-get install -y --no-install-recommends hyperfine cmake python3 jq
 
       - name: Trust git in this container
-        # The runner writes the workspace as the host user; the
+        # Self-hosted runner writes the workspace as the host user; the
         # container runs as root, so git's "dubious ownership" guard would
         # otherwise reject later operations (the workspace itself, the
         # Collections-C sub-checkout, and the gh-pages worktree used to seed
