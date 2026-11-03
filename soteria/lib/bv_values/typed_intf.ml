@@ -503,7 +503,7 @@ module type Solver_value = sig
     type sbool = [ `Bool ]
   end
 
-  include Symex.Value.S with type sbool = T.sbool
+  include Symex.Value.S with type sbool = T.sbool and type Expr.t = Svalue.t
 
   (** {2 Extra operations beyond {!Symex.Value.S}} *)
 

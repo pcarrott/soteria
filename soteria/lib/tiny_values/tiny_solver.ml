@@ -2,6 +2,44 @@ open Soteria_std
 open Logs.Import
 module Var = Svalue.Var
 
+(** Concrete values in a model of the constraints sent to the SMT solver [Intf].
+*)
+module Model
+    (Intf :
+      Solvers.Solver_interface.S
+        with type value = Svalue.t
+         and type ty = Svalue.ty) =
+struct
+  include Solvers.Model.Make (Intf)
+
+  let rec read_int : Smt.sexp -> Z.t option = function
+    | Atom n -> ( try Some (Z.of_string n) with Invalid_argument _ -> None)
+    | List [ Atom "-"; n ] -> Option.map Z.neg (read_int n)
+    | _ -> None
+
+  (** Binds the value [v] to the variable [var]. *)
+  let bind var (v : Svalue.t) : _ Solvers.Model.binding =
+    let ty = v.node.ty in
+    let eq = Svalue.sem_eq (Svalue.mk_var var ty) v in
+    let read : Smt.sexp -> Svalue.t option =
+      match ty with
+      | TBool -> (
+          function
+          | Atom "true" -> Some Svalue.v_true
+          | Atom "false" -> Some Svalue.v_false
+          | _ -> None)
+      | TInt -> fun n -> Option.map Svalue.int_z (read_int n)
+    in
+    { var; ty; eq; read }
+
+  (** Concrete values for the variables of [pcs] in a model of [pcs], sent to
+      [z3_exe] on top of the constraints it already holds. *)
+  let model z3_exe ~(pcs : Typed.Expr.t list) : Typed.Expr.t Var.Map.t option =
+    model z3_exe ~iter_vars:Svalue.iter_vars
+      ~bind:(fun var v ty -> Some (bind var (Svalue.mk_var v ty)))
+      pcs
+end
+
 module Make_incremental
     (Analysis : Analyses.S)
     (Intf :
@@ -120,6 +158,14 @@ struct
         | Unknown ->
             [%l.info "Solver returned unknown"];
             Unknown)
+
+  module Model = Model (Intf)
+
+  let model solver ~pcs =
+    Intf.push solver.z3_exe 1;
+    let res = Model.model solver.z3_exe ~pcs in
+    Intf.pop solver.z3_exe 1;
+    res
 
   let as_values_iter solver =
     Iter.append
@@ -462,6 +508,12 @@ struct
     Iter.append
       (Solver_state.iter solver.state)
       (Analysis.encode solver.analysis)
+
+  module Model = Model (Intf)
+
+  let model solver ~pcs =
+    Intf.reset solver.z3_exe;
+    Model.model solver.z3_exe ~pcs
 
   let as_exprs solver =
     as_values_iter solver |> Iter.map Typed.Expr.of_value |> Iter.to_list

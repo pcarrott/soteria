@@ -18,4 +18,5 @@ module Solver_interface = Solver_interface
 module Value = Value
 module Decls = Decls
 module Z3 = Z3
+module Model = Model
 module Config = Config

@@ -16,6 +16,7 @@ request.
 - Soteria: a `Coverage` module to track line, branch and function coverage during symbolic execution, enabled via the new `?coverage` argument of `Symex.run` and `Symex.Result.run`. Branch coverage can be recorded with the `[@span]`/`[@span_opt]` attributes on `if%sat`. Reports are written with `--output-coverage`, in JSON, Cobertura XML or LCOV format (`--coverage-format`).
 - Soteria Rust: new `auto` command, running compositional bi-abduction over every function of a file or crate to find reachable bugs.
 - Soteria Rust: `--show-manifest-summaries` prints the summary behind each manifest bug.
+- Soteria: `Symex.model ~pcs` returns a model of the path condition `pcs` (e.g. one returned by `Symex.run`), mapping its variables to closed expressions. Solvers implement it through the new `Solver.Mutable_incremental.model`.
 
 ### Changed
 

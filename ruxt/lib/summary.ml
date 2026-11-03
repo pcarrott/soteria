@@ -41,42 +41,27 @@ module Logic = struct
   end
 end
 
-module Value = struct
-  type t = Typed.T.any Typed.t
-  type syn = Typed.Expr.t
+module Value = Witness.Value
 
-  let pp fmt : t -> unit = Typed.pp Typed.T.pp_any fmt
-  let pp_syn fmt : syn -> unit = Typed.Expr.pp fmt
-  let to_syn : t -> syn = Typed.Expr.of_value
-  let iter_vars (syn : syn) = Typed.Svalue.iter_vars syn
-  let subst : (syn -> t) -> syn -> t = Typed.Expr.subst
-  let of_ptr : [> Typed.T.sptr_f ] Typed.t -> t = Typed.as_any
-  let as_ptr : t -> [< Typed.T.sptr_f ] Typed.t = Typed.cast_ptr_f
-  let sem_eq : t -> t -> Typed.sbool Typed.t = Typed.sem_eq
-  let learn_eq (syn : syn) (ret : t) = Rustsymex.Consumer.learn_eq syn ret
-
-  let nondet (ty : Charon.Types.ty) : t Rustsymex.t =
-    let open Rustsymex.Syntax in
-    let* res = Value_codec.nondet_valid ty in
-    match res with
-    | Soteria.Soteria_std.Compo_res.Ok ret -> Rustsymex.return ret
-    | _ -> failwith "Expected Ok in nondet"
-end
-
-type t = { ret : Value.syn; asrt : State.syn Logic.Asrt.t }
+type t = {
+  ret : Value.syn;
+  asrt : State.syn Logic.Asrt.t;
+  witness : Witness.syn;
+}
 
 let pp fmt = function
-  | { ret; asrt } ->
-      Fmt.pf fmt "{\n ret = %a;\n asrt = %a\n}" Value.pp_syn ret
+  | { ret; asrt; witness } ->
+      Fmt.pf fmt "{\n ret = %a;\n asrt = %a;\n witness = %a\n}" Value.pp_syn ret
         (Logic.Asrt.pp State.pp_syn)
-        asrt
+        asrt Witness.pp_syn witness
 
 let nondet (ty : Charon.Types.ty) : t list =
   Rustsymex.run ~stats:Caller ~mode:UX @@ Value.nondet ty
   |> ListLabels.map ~f:(function ret, pure ->
       let ret = Value.to_syn ret in
       let asrt = Logic.Asrt.make ~spatial:[] ~pure in
-      { ret; asrt })
+      let witness = Witness.Value (ty, ret) in
+      { ret; asrt; witness })
 
 module Var_graph = struct
   include Soteria.Soteria_std.Graph.Make_in_place (Typed.Svalue.Var)
@@ -184,36 +169,32 @@ let pure_of_pcs ~reachable ~spatial pcs =
   | Some true -> filtered
   | _ -> distinct :: filtered
 
-let make (ret : Value.t) (st : State.SM.st) (pcs : Typed.Expr.t list) :
-    (t, [> `MemoryLeak ]) result =
+let make (ret : Value.t) (witness : Witness.t) (st : State.SM.st)
+    (pcs : Typed.Expr.t list) : (t, [> `MemoryLeak ]) result =
   let open Result.Syntax in
   let ret = Value.to_syn ret in
+  let witness = Witness.to_syn witness in
   let spatial = State.to_syn @@ State.of_opt st in
   let reachable = reachable_vars ~ret ~spatial ~pcs in
   (* We can now filter the summary to keep only the reachable values *)
   let+ spatial = reachable_blocks_or_leaks ~reachable spatial in
   let pure = pure_of_pcs ~reachable ~spatial pcs in
   let asrt = Logic.Asrt.make ~spatial ~pure in
-  { ret; asrt }
+  { ret; asrt; witness }
 
 let produce (summ : t) (st : State.SM.st) :
-    (Value.t * State.SM.st) Rustsymex.Producer.t =
+    (Value.t * Witness.t * State.SM.st) Rustsymex.Producer.t =
   let open Rustsymex.Producer.Syntax in
   let* ret = Rustsymex.Producer.apply_subst Value.subst summ.ret in
   let* st = Logic.Asrt.Execute.produce summ.asrt st in
-  Rustsymex.Producer.return (ret, st)
+  let* witness = Rustsymex.Producer.apply_subst Witness.subst summ.witness in
+  Rustsymex.Producer.return (ret, witness, st)
 
 let consume (summ : t) (ret : Value.t) (st : State.SM.st) :
     (State.SM.st, State.syn list) Rustsymex.Consumer.t =
   let open Rustsymex.Consumer.Syntax in
   let* () = Value.learn_eq summ.ret ret in
   Logic.Asrt.Execute.consume summ.asrt st
-
-let run_producer (subst : Typed.Expr.Subst.t) (summ : t) :
-    (Value.t * Typed.Expr.Subst.t) State.SM.t =
- fun st ->
-  let symex = Rustsymex.Producer.run ~subst @@ produce summ st in
-  Rustsymex.map (fun ((ret, st), subst) -> ((ret, subst), st)) symex
 
 let implies ?names s_pre s_post =
   let section_name =
@@ -227,7 +208,9 @@ let implies ?names s_pre s_post =
     (* Make sure we run the producer inside the symex *)
     let* () = Rustsymex.return () in
     let subst = Typed.Expr.Subst.empty in
-    let* (ret, _), st = run_producer subst s_pre State.empty in
+    let* (ret, _, st), _ =
+      Rustsymex.Producer.run ~subst @@ produce s_pre State.empty
+    in
     Rustsymex.Consumer.run ~subst @@ consume s_post ret st
   in
   match Rustsymex.run ~stats:Caller ~mode:OX process with

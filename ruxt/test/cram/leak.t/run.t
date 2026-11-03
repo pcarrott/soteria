@@ -1,7 +1,11 @@
 Memory leaks are reported separately from type unsoundness
   $ ruxt leak.rs
   Compiling... done in <time>
-  Found memory leak!
+  Found memory leak, witnessed by:
+  #[test]
+  fn witness() {
+      crate::f();
+  }
   [1]
 
   $ ruxt leak.rs --ignore-leaks

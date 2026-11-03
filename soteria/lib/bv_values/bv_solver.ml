@@ -37,6 +37,56 @@ let[@inline] implies_or_contradicts ~(q : _ Svalue.t) ~(neg_q : _ Svalue.t)
         Some true
     | _ -> None
 
+(** Concrete values in a model of the constraints sent to the SMT solver [Intf].
+*)
+module Model
+    (Typed : Typed_intf.Solver_value)
+    (Intf :
+      Solvers.Solver_interface.S
+        with type value = Typed.Svalue.t
+         and type ty = Typed.Svalue.ty) =
+struct
+  module Svalue = Typed.Svalue
+  include Solvers.Model.Make (Intf)
+
+  let z_of_bits : Smt.sexp -> Z.t option = function
+    | Atom s when String.starts_with ~prefix:"#x" s ->
+        Some (Z.of_string_base 16 (String.sub s 2 (String.length s - 2)))
+    | Atom s when String.starts_with ~prefix:"#b" s ->
+        Some (Z.of_string_base 2 (String.sub s 2 (String.length s - 2)))
+    | _ -> None
+
+  (** Binds the value [v] to the variable [var]. Floats are held by their bits.
+  *)
+  let bind var (v : Svalue.t) : _ Solvers.Model.binding option =
+    let eq ty f = Svalue.Bool.sem_eq (f (Svalue.mk_var var ty)) v in
+    match v.node.ty with
+    | TBool ->
+        let read : Smt.sexp -> Svalue.t option = function
+          | Atom "true" -> Some Svalue.Bool.v_true
+          | Atom "false" -> Some Svalue.Bool.v_false
+          | _ -> None
+        in
+        Some { var; ty = Svalue.t_bool; eq = eq Svalue.t_bool Fun.id; read }
+    | TBitVector n ->
+        let ty = Svalue.t_bv n in
+        let read bits = Option.map (Svalue.BitVec.mk n) (z_of_bits bits) in
+        Some { var; ty; eq = eq ty Fun.id; read }
+    | TFloat fp ->
+        let ty = Svalue.t_bv (Svalue.FloatPrecision.size fp) in
+        let read bits = Option.map (Svalue.Float.mk_bits fp) (z_of_bits bits) in
+        Some { var; ty; eq = eq ty Svalue.BitVec.to_float_raw; read }
+    | _ -> None
+
+  (** Concrete values for the variables of [pcs] in a model of [pcs], sent to
+      [z3_exe] on top of the constraints it already holds. Variables with no
+      concrete representation are left out. *)
+  let model z3_exe ~(pcs : Typed.Expr.t list) : Typed.Expr.t Var.Map.t option =
+    model z3_exe ~iter_vars:Svalue.iter_vars
+      ~bind:(fun var v ty -> bind var (Svalue.mk_var v ty))
+      pcs
+end
+
 module Make_incremental
     (Typed : Typed_intf.Solver_value)
     (Analysis : Analyses.Make(Typed).S)
@@ -173,6 +223,14 @@ struct
         | Unknown ->
             [%l.info "Solver returned unknown"];
             Unknown)
+
+  module Model = Model (Typed) (Intf)
+
+  let model solver ~pcs =
+    Intf.push solver.z3_exe 1;
+    let res = Model.model solver.z3_exe ~pcs in
+    Intf.pop solver.z3_exe 1;
+    res
 
   let as_values_iter solver =
     Iter.append
@@ -509,6 +567,12 @@ struct
 
   let pp fmt solver =
     (Fmt.Dump.iter (Fun.flip as_values_iter) Fmt.nop Typed.ppa) fmt solver
+
+  module Model = Model (Typed) (Intf)
+
+  let model solver ~pcs =
+    Intf.reset solver.z3_exe;
+    Model.model solver.z3_exe ~pcs
 
   let as_exprs solver =
     as_values_iter solver |> Iter.map Typed.Expr.of_value |> Iter.to_list

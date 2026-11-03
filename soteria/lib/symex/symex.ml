@@ -361,6 +361,13 @@ module type S = sig
     'a t ->
     ('a * Value.Expr.t list) list
 
+  (** [model ~pcs] returns a model of the path condition [pcs] (e.g. one
+      returned by {!run}), mapping its variables to closed expressions, or
+      [None] if no model is found. Variables with no concrete representation are
+      left out, as are those that do not appear in [pcs], which can take any
+      value. *)
+  val model : pcs:Value.Expr.t list -> Value.Expr.t Var.Map.t option
+
   module Result : sig
     include module type of Result
 
@@ -1046,6 +1053,8 @@ module Make (Sol : Solver.Mutable_incremental) :
   let run ?coverage ?flamegraph ?stats ?fuel ~mode iter =
     let@ () = setup ?coverage ?flamegraph ?stats ?fuel ~mode in
     Iter.to_list @@ run_iter ~mode iter
+
+  let model ~pcs = Solver.run @@ fun () -> Solver.model ~pcs
 
   module Result = struct
     include Result

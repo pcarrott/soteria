@@ -22,9 +22,6 @@ let exec_crate (crate : Crate.t) =
     if passes <= 0 then Result.ok () (* Fuel exhausted, no unsoundness found *)
     else (* Pass over the library and update the summary context *)
       let* summ_ctx = Library.infer_summaries ~fuel summ_ctx library in
-      (* let size = Summary.Context.M.fold (fun _ (v, u, s) acc -> acc +
-         List.length v + List.length u + List.length s) summ_ctx 0 in Fmt.pr
-         "Current number of summaries: %d@." size; *)
       find_unsoundness (passes - 1) summ_ctx
   in
   (* Collect statistics from all the runs *)
@@ -63,8 +60,14 @@ let exec (crate : Crate.t) =
   let outcome, msg =
     match exec_crate crate with
     | Ok () -> (Analyses.Outcome.Ok, "No type unsoundness found!\n")
-    | Error `TypeUnsound -> (Analyses.Outcome.Error, "Found type unsoundness!\n")
-    | Error `MemoryLeak -> (Analyses.Outcome.Error, "Found memory leak!\n")
+    | Error (`TypeUnsound witness) ->
+        ( Analyses.Outcome.Error,
+          Fmt.str "Found type unsoundness, witnessed by:\n%a\n"
+            Witness.pp_program witness )
+    | Error (`MemoryLeak witness) ->
+        ( Analyses.Outcome.Error,
+          Fmt.str "Found memory leak, witnessed by:\n%a\n" Witness.pp_program
+            witness )
   in
   Fmt.pr "%s" msg;
   Analyses.Outcome.exit outcome

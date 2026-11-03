@@ -17,6 +17,13 @@ module type Mutable_incremental = sig
   (** Returns the satisfiability of the current state. *)
   val sat : t -> Solver_result.t
 
+  (** [model solver ~pcs] returns a model of the path condition [pcs], mapping
+      its variables to closed expressions, or [None] if no model is found.
+      Variables with no concrete representation are left out, as are those that
+      do not appear in [pcs], which can take any value. [solver] must be in its
+      initial state, which is left unchanged. *)
+  val model : t -> pcs:Value.Expr.t list -> Value.Expr.t Var.Map.t option
+
   (** Attempts to simplify the given value according to the current solver
       state. *)
   val simplify : t -> 'a Value.t -> 'a Value.t
@@ -42,6 +49,7 @@ module Mutable_to_effectful (M : Mutable_incremental) = struct
     wrap (fun st -> M.add_constraints st ?simplified vs) ()
 
   let sat () = wrap M.sat ()
+  let model ~pcs = wrap (fun st -> M.model st ~pcs) ()
   let simplify x = wrap (fun st -> M.simplify st x) ()
   let fresh_var x = wrap (fun st -> M.fresh_var st x) ()
   let as_exprs () = wrap M.as_exprs ()
@@ -59,6 +67,7 @@ module Mutable_to_pooled (M : Mutable_incremental) = struct
     wrap (fun st -> M.add_constraints st ?simplified vs) ()
 
   let sat () = wrap M.sat ()
+  let model ~pcs = wrap (fun st -> M.model st ~pcs) ()
   let simplify x = wrap (fun st -> M.simplify st x) ()
   let fresh_var x = wrap (fun st -> M.fresh_var st x) ()
   let as_exprs () = wrap M.as_exprs ()

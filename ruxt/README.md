@@ -9,8 +9,9 @@ is unsound.
 dune exec -- ruxt <file.rs | crate-dir> [--only-public] [--pass-fuel N]
 ```
 
-It prints `Found type unsoundness!` (exit code 1), `Found memory leak!`
-(exit code 1) or `No type unsoundness found!` (exit code 0).
+It prints `No type unsoundness found!` (exit code 0), or a type unsoundness or
+memory leak together with a witness (exit code 1): a Rust test that reaches the
+bug through the safe API alone, to be added to the root of the crate.
 
 ## How it works
 
@@ -23,15 +24,24 @@ the way is a type unsoundness.
 public ones with `--only-public`). Functions whose arguments are all primitive
 types are *constructors*. `Drop` impls are recorded to drop values.
 
-**Summaries** (`summary.ml`). A summary `{ret; asrt}` of type `T` describes a
-value `r` of type `T` and the heap it owns:
+**Summaries** (`summary.ml`). A summary `{ret; asrt; witness}` of type `T`
+describes a value `r` of type `T` and the heap it owns:
 
 ```
 ∃x⃗. ⌜π⌝ ∗ ℓ₁ ↦ b₁ ∗ … ∗ ℓₙ ↦ bₙ
 ```
 
-Only the heap and path condition reachable from `r` are kept. A heap
-allocation that is still alive but unreachable from `r` is a memory leak.
+Only the heap and path condition reachable from `r` and from the symbolic values
+of the witness are kept. A heap allocation that is still alive but unreachable
+is a memory leak.
+
+**Witnesses** (`witness.ml`). The witness of a summary is a Rust expression
+building `r` through calls to the library, parametric on symbolic primitive
+values. The witness of a call runs the witnesses of its arguments, calls the
+function and drops what the call drops. Its variables are symbolic variables,
+printed as Rust variables: producing a summary renames them to fresh ones, so
+composing witnesses needs no renaming. When a call goes wrong, its witness is
+instantiated with a model of the path condition of the failing path.
 
 **Passes** (`library.ml`, `refute.ml`). Pass 0 runs the constructors.
 Passes 1 to `--pass-fuel` (default 5) run every other function on each
@@ -85,6 +95,18 @@ follows. Their heap part is `emp`, as `Even` owns no heap.
 | 1    | `next`   | `Even{v+2}` or `Even{v}`, with `v` from `Σ_new`                   | implies `Σ_new`: discarded    |
 | 1    | `succ`   | `Σ_succ ≜ ∃n,v. ⌜r = Even{v+1} ∧ v = n − n rem 2 ∧ v <s MAX−1⌝` | kept                          |
 | 2    | `noop`   | on `Σ_succ`: `ofs ≠ 0`, out-of-bounds store                       | **type unsoundness**          |
+
+The witness of the type unsoundness composes the witnesses of `Σ_new` and
+`Σ_succ` with the call to `noop`, at a model where `n = -1`:
+
+```rust
+#[test]
+fn witness() {
+    let mut v5 = crate::new(-1i32);
+    crate::succ(&mut v5);
+    crate::noop(v5);
+}
+```
 
 The other runs of `even.t` make `succ` private, or `unsafe`, so that it is not
 part of the analysed API. Then `next` only produces values implied by `Σ_new`,

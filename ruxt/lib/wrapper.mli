@@ -13,4 +13,6 @@ val exec :
   fuel:Soteria.Symex.Fuel_gauge.t ->
   t ->
   Summary.t list ->
-  ((Types.ty * Summary.t) list, [> `MemoryLeak | `TypeUnsound ]) result
+  ( (Types.ty * Summary.t) list,
+    [> `MemoryLeak of Witness.program | `TypeUnsound of Witness.program ] )
+  result
