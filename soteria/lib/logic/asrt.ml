@@ -20,7 +20,7 @@ module M (Symex : Symex.Base) = struct
   type 'a t = 'a atom list [@@deriving show { with_path = false }]
 
   let make ~spatial ~pure =
-    List.map (fun x -> Spatial x) spatial @ List.map (fun x -> Pure x) pure
+    List.map (fun x -> Pure x) pure @ List.map (fun x -> Spatial x) spatial
 
   (** [Execute] contains the utilities to perform {e production} and
       {e consumption} of a given assertion, using the consumer and producer of
