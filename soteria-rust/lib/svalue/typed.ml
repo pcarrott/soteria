@@ -96,6 +96,7 @@ let t_float (ty : Types.float_type) : [< T.sfloat ] ty =
 
 let t_tuple tys : [> T.tuple ] ty = TExtension (TTuple tys)
 let t_array ty n : [> T.tuple ] ty = TExtension (TArray (ty, n))
+let t_poly () : [> T.poly ] ty = TExtension TPolyType
 
 let t_enum adt : [> T.enum ] ty =
   assert (Common.Charon_util.tyref_is_substituted adt);
@@ -475,6 +476,21 @@ module Adt = struct
     match kind v with
     | Extension (PolyVal ty_id) -> ty_id
     | _ -> todo_migration "as_type_var unop"
+
+  let as_type_var_opt v =
+    match kind v with Extension (PolyVal ty_id) -> Some ty_id | _ -> None
+
+  let rec map_poly f v =
+    match kind v with
+    | Extension (PolyVal ty_id) -> mk_poly (f ty_id)
+    | Extension ext -> Ext0.mk ( <| ) (get_ty v) (Ext0.eval (map_poly f) ext)
+    | Triop (Ite, c, a, b) ->
+        Bool.ite (map_poly f c) (map_poly f a) (map_poly f b)
+    | Binop (Eq, a, b) -> sem_eq_untyped (map_poly f a) (map_poly f b)
+    | Binop (And, a, b) -> Bool.and_ (map_poly f a) (map_poly f b)
+    | Binop (Or, a, b) -> Bool.or_ (map_poly f a) (map_poly f b)
+    | Unop (Not, a) -> Bool.not (map_poly f a)
+    | _ -> v
 
   module Checked = struct
     let mk_enum tref variant vs =

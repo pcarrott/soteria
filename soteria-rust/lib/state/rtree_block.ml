@@ -98,6 +98,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       | TBitVector _ -> return v
       | TExtension TFullPtr -> Sptr.decay (Typed.Ptr.ptr_of v)
       | TFloat _ -> Value_codec.float_to_bv_bits v
+      | TExtension TPolyType -> not_impl "Splitting a polymorphic value"
       | _ -> L.failwith "scalar_to_bv on non-scalar"
 
     let split_scalar (v : Typed.([< T.scalar ] t)) at =

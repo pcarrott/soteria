@@ -92,7 +92,7 @@ let add_block_edges graph spatial =
       let locs, outs = State.iter_vars syn in
       let add_edge =
         match syn with
-        | State.Ser_heap _ -> Var_graph.add_edge graph
+        | State.Ser_heap _ | State.Ser_opaques _ -> Var_graph.add_edge graph
         | State.Ser_pointers _ -> Var_graph.add_double_edge graph
       in
       Iter.product locs (Iter.persistent_lazy outs) (fun ((x, _), (y, _)) ->
@@ -141,7 +141,7 @@ let reachable_blocks_or_leaks ~reachable spatial =
 let locs_of_spatial spatial =
   ListLabels.fold_left spatial ~init:[] ~f:(fun acc -> function
     | State.Ser_heap (loc, _) when not (List.mem loc acc) -> loc :: acc
-    | State.Ser_heap _ | State.Ser_pointers _ -> acc)
+    | State.Ser_heap _ | State.Ser_pointers _ | State.Ser_opaques _ -> acc)
 
 (* The path condition atoms that mention a reachable variable, minus the
    [distinct] atoms that the single distinct assertion over [locs] subsumes. *)

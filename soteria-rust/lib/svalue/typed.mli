@@ -75,6 +75,7 @@ val t_lit : Types.scalar_type -> [> T.sint ] ty
 val t_ptr_f : unit -> [> T.sptr_f ] ty
 val t_ptr_t : unit -> [> T.sptr_t ] ty
 val t_enum : Types.type_decl_ref -> [> T.enum ] ty
+val t_poly : unit -> [> T.poly ] ty
 
 (* casts *)
 
@@ -276,6 +277,12 @@ module Adt : sig
   val as_tuple2 : [< T.tuple ] t -> [> T.any ] t * [> T.any ] t
   val as_tuple3 : [< T.tuple ] t -> [> T.any ] t * [> T.any ] t * [> T.any ] t
   val as_type_var : [< T.poly ] t -> Types.type_var_id
+
+  (** The type variable of a value built with {!mk_poly}, if it is one. *)
+  val as_type_var_opt : 'a t -> Types.type_var_id option
+
+  (** Renames the type variables of the polymorphic values within a value. *)
+  val map_poly : (Types.type_var_id -> Types.type_var_id) -> 'a t -> 'a t
 
   (** Whether the enum value is of the given variant. *)
   val is_variant : Types.variant_id -> [< T.enum ] t -> [> T.sbool ] t

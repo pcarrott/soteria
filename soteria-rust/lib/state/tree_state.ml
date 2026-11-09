@@ -283,6 +283,7 @@ module Make (Borrows : Tree_borrows.T) = struct
         [@sym_state.ignore
           { empty = []; pp = Fmt.Dump.list Error.pp_with_trace }]
     pointers : DecayMap.t option;
+    opaques : Opaque.t option;
     thread_destructor :
       (unit ->
       t option ->
@@ -965,6 +966,11 @@ module Make (Borrows : Tree_borrows.T) = struct
            Trace.rename ~rev:true 0 "Leaking function" leak_trace
          in
          Result.error (Error.decorate leak_trace `MemoryLeak))
+
+  let drop_opaque ty_var (v : Typed.([< T.any ] t)) =
+    [%l.debug
+      "Executing Drop_opaque of %a: %a" Typed.ppa v Types.pp_type_var_id ty_var];
+    with_opaques @@ Opaque.drop ty_var (Typed.as_any v)
 
   let add_error e =
     let@ errors = with_errors_sym in

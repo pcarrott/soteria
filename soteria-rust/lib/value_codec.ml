@@ -757,12 +757,12 @@ let rec transmute_one ~(to_ty : Types.ty) (v : [< Typed.T.scalar ] Typed.t) :
   | TBitVector _, (TRawPtr _ | TRef _ | TFnPtr _) ->
       return (Typed.Ptr.of_address_f v)
   | _, TPattern (inner_ty, _) -> transmute_one ~to_ty:inner_ty v
-  | TExtension TPolyType, TVar (Free type_var_id) ->
-      let tid = Typed.Adt.as_type_var v in
-      if Types.TypeVarId.equal_id type_var_id tid then return (Typed.as_any v)
-      else
-        not_impl "transmute_one: mismatched type variables %a -> %a"
-          Types.pp_type_var_id type_var_id Types.pp_type_var_id tid
+  | TExtension TPolyType, TVar (Free type_var_id) -> (
+      match Typed.Adt.as_type_var_opt v with
+      | Some tid when not (Types.TypeVarId.equal_id type_var_id tid) ->
+          not_impl "transmute_one: mismatched type variables %a -> %a"
+            Types.pp_type_var_id type_var_id Types.pp_type_var_id tid
+      | _ -> return (Typed.as_any v))
   | _, TVar (Bound _) ->
       L.failwith "transmute_one: bound type variable encountered?"
   | _, TVar (Free _) ->
@@ -844,7 +844,10 @@ let rec nondet_raw :
           not_impl "cannot create a symbolic value of unsupported type %a" pp_ty
             ty)
   | TPattern (inner, _) -> nondet_raw inner
-  | TVar (Free id) -> Result.ok (Typed.Adt.mk_poly id)
+  (* Each value of a type variable has its own identity *)
+  | TVar (Free _) ->
+      let+ v = nondet (Typed.t_poly ()) in
+      Ok v
   | ty -> not_impl "nondet: unsupported type %a" pp_ty ty
 
 (** Much like {!nondet_raw}, but also assumes validity invariants for the value,

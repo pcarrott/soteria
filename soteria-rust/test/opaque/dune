@@ -1,0 +1,4 @@
+(test
+ (name test_opaque)
+ (package soteria-rust)
+ (libraries soteria_rust_lib soteria alcotest))

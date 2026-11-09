@@ -141,7 +141,13 @@ module Make (StateImpl : State.S) = struct
           | Clause (Free _) -> (
               let trait_decl = Crate.get_trait_decl trait_ref in
               match trait_decl.item_meta.lang_item with
-              | Some RustcLangItemDestruct -> ok (`Synth GenericDropInPlace)
+              | Some RustcLangItemDestruct -> (
+                  (* In compositional mode, the values of type variables are
+                     opaque, and owned by the state until they are dropped *)
+                  match (trait_ref.generics.types, Config.get_mode ()) with
+                  | [ TVar (Free id) ], Compositional ->
+                      ok (`Synth (DropOpaque id))
+                  | _ -> ok (`Synth GenericDropInPlace))
               | Some _ | None ->
                   not_impl "trait call %a::%s on generic" Crate.pp_name
                     trait_decl.item_meta.name
@@ -1453,6 +1459,15 @@ module Make (StateImpl : State.S) = struct
   and exec_fun (fn : Fun_kind.t) args =
     match fn with
     | Synthetic GenericDropInPlace -> ok Typed.Adt.unit
+    | Synthetic (DropOpaque id) ->
+        let ptr =
+          match args with
+          | [ ptr ] -> Typed.cast_ptr_f ptr
+          | _ -> L.failwith "drop of an opaque value expects one argument"
+        in
+        let* v = State.load ptr (TVar (Free id)) in
+        let+ () = State.drop_opaque id v in
+        Typed.Adt.unit
     | Real fundef ->
         let fn = Crate.get_fun fundef.id in
         exec_real_fun fn fundef.generics args

@@ -1,4 +1,10 @@
-type synth_fn = GenericDropInPlace
+type synth_fn =
+  | GenericDropInPlace
+  | DropOpaque of
+      (Charon.Types.type_var_id
+      [@compare Charon.Types.TypeVarId.compare_id]
+      [@printer Charon.Types.pp_type_var_id])
+      (** Drops the opaque value of a type variable *)
 [@@deriving ord, show { with_path = false }]
 
 type t =

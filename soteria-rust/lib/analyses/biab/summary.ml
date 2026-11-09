@@ -102,7 +102,7 @@ let filter_serialized_state relevant_vars (state : Bi_state.syn list) =
           (* TODO: Should we signal as a warning any address that is kept but
              not exposed? *)
           is_relevant loc || is_relevant addr.address
-      | Ser_pointers (Sptr.DecayMap.Ser_layouts _) -> true)
+      | Ser_pointers (Sptr.DecayMap.Ser_layouts _) | Ser_opaques _ -> true)
   in
   (filtered, Leak_set.to_seq leak_origins |> List.of_seq)
 
@@ -171,7 +171,8 @@ let prune ~name (summary : after_exec t) : pruned t =
           Iter.of_list outs |> Iter.flat_map Svalue.iter_vars
         in
         Iter.product (Svalue.iter_vars l) (Iter.persistent_lazy b_iter)
-          (fun ((x, _), (y, _)) -> Var_graph.add_edge graph x y));
+          (fun ((x, _), (y, _)) -> Var_graph.add_edge graph x y)
+    | Bi_state.State.Ser_opaques _ -> ());
   (* [init_reachable] is the set of initially-reachable variables, and we have a
      reachability [graph]. We can compute all reachable values. *)
   let reachable = Var_graph.reachable_from graph init_reachable in

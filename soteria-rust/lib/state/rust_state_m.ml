@@ -261,6 +261,7 @@ module type S = sig
     val add_error : Error.with_trace -> (unit, 'env) t
     val pop_error : unit -> ('a, 'env) t
     val leak_check : unit -> (unit, 'env) t
+    val drop_opaque : Types.type_var_id -> [< any ] v -> (unit, 'env) t
     val fake_read : [< sptr_f ] v -> Types.ty -> (unit, 'env) t
 
     val size_and_align_of_val :
@@ -599,6 +600,7 @@ module Make (State : State_intf.S) :
     let[@inline] add_error e = ESM.lift (add_error e)
     let[@inline] pop_error () : ('a, 'env) monad = ESM.lift (pop_error ())
     let[@inline] leak_check () = ESM.lift (leak_check ())
+    let[@inline] drop_opaque ty_var v = ESM.lift (drop_opaque ty_var v)
 
     let[@inline] register_thread_exit (f : unit -> (unit, unit) monad) =
       let unlifted () : (unit, Error.with_trace, syn list) SM.Result.t =

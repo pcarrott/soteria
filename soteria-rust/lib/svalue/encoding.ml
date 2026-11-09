@@ -118,6 +118,10 @@ end
 (* More explicit than an [ignore] *)
 let gen_decl = ignore
 
+(* Values of a type variable are only known by their type variable *)
+let poly_size = 32
+let poly_sort = t_bits poly_size
+
 let encode_ty sort_of_ty = function
   | TTuple tys -> Tuple_sort.sort (List.map sort_of_ty tys)
   | TEnum adt -> Enum_sort.sort sort_of_ty adt
@@ -125,8 +129,8 @@ let encode_ty sort_of_ty = function
   | TThinPtr -> Thin_ptr_sort.sort ()
   | TFullPtr -> Full_ptr_sort.sort ()
   | TPtrMeta -> Ptr_meta_sort.sort ()
-  | (TUnion _ | TPolyType) as ty ->
-      L.failwith "Cannot encode type %a to SMT-LIB" pp_ext_ty ty
+  | TPolyType -> poly_sort
+  | TUnion _ as ty -> L.failwith "Cannot encode type %a to SMT-LIB" pp_ext_ty ty
 
 let encode_unop sort_of_ty ~ty : Unop.t -> sexp -> sexp = function
   | ThinPtrPart part ->
@@ -186,4 +190,4 @@ let encode_value sort_of_ty encode ~ty = function
   | PtrMeta (MetaVTable v) -> Ptr_meta_sort.mk_ptr (encode v)
   | Unop (op, v) -> encode_unop sort_of_ty ~ty:v.node.ty op (encode v)
   | Union _ -> L.failwith "Cannot encode union values to SMT-LIB"
-  | PolyVal _ -> L.failwith "Cannot encode polymorphic values to SMT-LIB"
+  | PolyVal id -> bv_k poly_size (Z.of_int (Types.TypeVarId.to_int id))
