@@ -19,7 +19,9 @@ module Value = struct
 
   let nondet (ty : Types.ty) : t Rustsymex.t =
     let open Rustsymex.Syntax in
-    let* res = Value_codec.nondet_valid ty in
+    let* res, _ =
+      Layout.SM.run_with_state ~state:None (Value_codec.nondet_valid ty)
+    in
     match res with
     | Soteria.Soteria_std.Compo_res.Ok ret -> Rustsymex.return ret
     | _ -> failwith "Expected Ok in nondet"

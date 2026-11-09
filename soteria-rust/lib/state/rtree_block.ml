@@ -145,11 +145,12 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
         covering the type's full size. If the layout is symbolic, this may
         branch. *)
     let explode_shallow value ty =
-      let*^ parts =
-        Value_codec.encode ~depth:1 ~offset:(BV.usizei 0) value ty
+      let* parts =
+        DecayMap.SM.lift_layout
+        @@ Value_codec.encode ~depth:1 ~offset:(BV.usizei 0) value ty
       in
       let parts = get_ok parts in
-      let*^ total = Layout.size_of ty in
+      let* total = DecayMap.SM.lift_layout @@ Layout.size_of ty in
       let total = get_ok total in
       let parts =
         Iter.to_list parts
@@ -266,9 +267,9 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       (* we're basically guaranteed these won't error (ie. layout error) by now,
          so we can safely unwrap. *)
       let*^ ty = Layout.normalise ty in
-      let*^ layout = Layout.layout_of ty in
+      let* layout = DecayMap.SM.lift_layout @@ Layout.layout_of ty in
       let layout = get_ok layout in
-      let+^ v = Value_codec.nondet_valid ty in
+      let+ v = DecayMap.SM.lift_layout @@ Value_codec.nondet_valid ty in
       let v = get_ok v in
       let v = Typed.Expr.of_value v in
       [ (if Layout.is_aggregate layout then SScalar v else SAggregate (v, ty)) ]
@@ -456,6 +457,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
   end
 
   let lift_symex x = SM.lift @@ DecayMap.SM.lift x
+  let lift_layout x = SM.lift @@ DecayMap.SM.lift_layout x
 
   let sint_to_int v =
     match BV.to_z v with
@@ -463,7 +465,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
     | None -> not_impl "Cannot convert size to int"
 
   let mk_fix_typed offset ty () =
-    let*^ len = Layout.size_of ty in
+    let* len = DecayMap.SM.lift_layout @@ Layout.size_of ty in
     let len = get_ok len in
     let+ fixes = mk_fix_typed ty () in
     [ lift_fixes ~offset ~len fixes ]
@@ -514,7 +516,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
     | Aggregate _ ->
         L.failwith "decode_mem_val: aggregate values handled in decode_tree"
     | Zeros ->
-        let**^ size = Layout.size_of ty in
+        let** size = DecayMap.SM.lift_layout @@ Layout.size_of ty in
         let* size = sint_to_int size in
         let zero = BV.zero (size * 8) in
         let+ res = Value_codec.transmute_one ~to_ty:ty zero in
@@ -536,8 +538,9 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
       parts into bitvectors (decaying pointers) and concatenates them. Errors if
       the type has any padding, as those bytes are uninitialised. *)
   let whole_to_scalar (value : Typed.([< T.aggregate ] t)) (vty : Types.ty) =
-    let**^ parts =
-      Value_codec.encode ~offset:(BV.usizei 0) (Typed.as_any value) vty
+    let** parts =
+      DecayMap.SM.lift_layout
+      @@ Value_codec.encode ~offset:(BV.usizei 0) (Typed.as_any value) vty
     in
     let parts =
       parts
@@ -551,7 +554,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
     let* parts = sort_parts parts in
     (* the parts must contiguously cover the whole type, as padding bytes are
        uninitialised *)
-    let**^ total = Layout.size_of vty in
+    let** total = DecayMap.SM.lift_layout @@ Layout.size_of vty in
     let rec is_contiguous cur = function
       | [] -> cur ==@ total
       | (_, o, e) :: rest -> cur ==@ o &&@ is_contiguous e rest
@@ -662,7 +665,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
   let load ~(ignore_borrow : bool) (ofs : Typed.([< T.sint ] t)) (ty : Types.ty)
       (tag : Ptr_tag.t option) (tb : Borrows.Tree.t option) =
     let open SM.Syntax in
-    let** size = lift_symex @@ Layout.size_of ty in
+    let** size = lift_layout @@ Layout.size_of ty in
     (* we expect ZSTs to never be read through here. *)
     let size = Typed.BV.cast_nonzero size in
     let ((_, bound) as range) = Range.of_low_and_size ofs size in
@@ -691,7 +694,7 @@ module Make (Borrows : Tree_borrows.M(DecayMap.SM).S) = struct
   let load_whole ~(ignore_borrow : bool) (ofs : Typed.([< T.sint ] t))
       (ty : Types.ty) (tag : Ptr_tag.t option) (tb : Borrows.Tree.t option) =
     let open SM.Syntax in
-    let** size = lift_symex @@ Layout.size_of ty in
+    let** size = lift_layout @@ Layout.size_of ty in
     let size = Typed.BV.cast_nonzero size in
     let ((_, bound) as range) = Range.of_low_and_size ofs size in
     let mk_fixes = mk_fix_typed ofs ty in

@@ -98,10 +98,11 @@ let filter_serialized_state relevant_vars (state : Bi_state.syn list) =
             [%l.trace "Location %a leaked" Typed.Expr.pp loc];
             Leak_set.add leak_origins (Block.trace b));
           keep
-      | Ser_pointers (loc, addr) ->
+      | Ser_pointers (Sptr.DecayMap.Ser_decays (loc, addr)) ->
           (* TODO: Should we signal as a warning any address that is kept but
              not exposed? *)
-          is_relevant loc || is_relevant addr.address)
+          is_relevant loc || is_relevant addr.address
+      | Ser_pointers (Sptr.DecayMap.Ser_layouts _) -> true)
   in
   (filtered, Leak_set.to_seq leak_origins |> List.of_seq)
 
@@ -157,10 +158,13 @@ let prune ~name (summary : after_exec t) : pruned t =
      variables in $l to all variables in i. *)
   let all_fragments = summary.pre @ summary.post in
   ListLabels.iter all_fragments ~f:(function
-    | Bi_state.State.Ser_pointers (l, addr) ->
+    | Bi_state.State.Ser_pointers (Sptr.DecayMap.Ser_decays (l, addr)) ->
         let addr_iter = Iter.persistent_lazy (Svalue.iter_vars addr.address) in
         Iter.product (Svalue.iter_vars l) addr_iter (fun ((x, _), (y, _)) ->
             Var_graph.add_double_edge graph x y)
+    (* The layouts of the type variables are always kept *)
+    | Bi_state.State.Ser_pointers (Sptr.DecayMap.Ser_layouts (_, size)) ->
+        Svalue.iter_vars size (fun (x, _) -> Var_hashset.add init_reachable x)
     | Bi_state.State.Ser_heap (l, b) ->
         let b_iter =
           let _, outs = Bi_state.State.Freeable_block_with_meta.ins_outs b in
@@ -226,10 +230,12 @@ let rec analyse : type a. fn:Charon.UllbcAst.fun_decl -> a t -> analysed t =
                 |> Rustsymex.iter_list ~f:(fun (ty, arg) ->
                     let open Rustsymex in
                     let open Syntax in
-                    let* res =
-                      Value_codec.validity ty arg (fun constr _err ->
-                          let* () = assume [ constr ] in
-                          Result.ok ())
+                    let* res, _ =
+                      Layout.SM.run_with_state ~state:None
+                      @@ Value_codec.validity ty arg (fun constr _err ->
+                          let open Layout.SM.Syntax in
+                          let* () = Layout.SM.assume [ constr ] in
+                          Layout.SM.Result.ok ())
                     in
                     match res with
                     | Ok () -> return ()

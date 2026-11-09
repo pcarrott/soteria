@@ -180,17 +180,20 @@ struct
     let lift_rsymex_res m : 'a t =
      fun _handler _get_all _whole -> SM.lift (DecayMap.SM.lift m)
 
+    let lift_layout_res m : 'a t =
+     fun _handler _get_all _whole -> SM.lift (DecayMap.SM.lift_layout m)
+
     let not_impl ?tip ?issue fmt =
       Fmt.kstr (fun msg -> lift @@ not_impl ?tip ?issue "%s" msg) fmt
 
     let of_opt_not_impl ?tip ?issue msg x =
       lift @@ of_opt_not_impl ?tip ?issue msg x
 
-    let layout_of ty = lift_rsymex_res @@ Layout.layout_of ty
+    let layout_of ty = lift_layout_res @@ Layout.layout_of ty
     let normalise ty = lift_rsymex @@ Layout.normalise ty
 
     let enum_single_variant ty =
-      lift_rsymex_res @@ Layout.enum_single_variant ty
+      lift_layout_res @@ Layout.enum_single_variant ty
 
     let assert_or_error cond err : unit t =
       lift_rsymex_res @@ Rustsymex.assert_or_error cond err
@@ -400,8 +403,8 @@ end
     further, with their [ty] set. Offsets all blocks by [offset] if specified.
 *)
 let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
-    (Typed.block Iter.t, 'e, 'f) Rustsymex.Result.t =
-  let open Rustsymex in
+    (Typed.block Iter.t, 'e, 'f) Layout.SM.Result.t =
+  let open Layout.SM in
   let open Syntax in
   let open Result in
   let depth' = Option.map Int.pred depth in
@@ -413,7 +416,7 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
         let++ ys = encode ?depth:depth' ~offset v ty in
         Iter.append acc ys)
   in
-  let* ty = Layout.normalise ty in
+  let*^ ty = Layout.normalise ty in
   let** layout = Layout.layout_of ty in
   if%sat layout.size ==@ Usize.(0s) then ok Iter.empty
   else
@@ -450,7 +453,7 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
     | Array { is_ptr = true; _ } ->
         let fptr = Typed.cast_ptr_f value in
         let ptr = Typed.Ptr.of_ptr_t (Typed.Ptr.ptr_of fptr) in
-        let* pointee = Layout.normalise (get_pointee ty) in
+        let*^ pointee = Layout.normalise (get_pointee ty) in
         let meta =
           match Layout.dst_kind pointee with
           | LenKind -> Typed.Ptr.len_meta fptr
@@ -461,7 +464,7 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
     | Enum (_, layouts) -> (
         let adt = ty_as_adt ty in
         let value = Typed.cast_enum ~adt value in
-        let* variant = variant_for_enum value adt in
+        let*^ variant = variant_for_enum value adt in
         let variant = variant.id in
         let fields = Typed.Adt.as_enum_of_variant variant value in
         let++ fields =
@@ -502,10 +505,10 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
     Reference:
     https://doc.rust-lang.org/reference/behavior-considered-undefined.html#r-undefined.validity
 *)
-let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
+let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
   (* We annotate each relevant helper function or match branch with the matching
      rule in the above-referenced document. *)
-  let open Rustsymex in
+  let open Layout.SM in
   let open Syntax in
   let open Result in
   (* undefined.validity.wide *)
@@ -550,7 +553,7 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
           (fun acc p -> acc ||@ pattern_valid_cond inner_ty v p)
           Typed.v_false pats
   in
-  let* ty = Layout.normalise ty in
+  let*^ ty = Layout.normalise ty in
   match (ty : Types.ty) with
   (* undefined.validity.bool *)
   | TScalar TBool ->
@@ -627,21 +630,10 @@ let rec validity ?(check_ref = fun _ _ -> Rustsymex.Result.ok ()) ty v f =
   (* we fail loudly to avoid missing cases *)
   | _ -> L.failwith "validity: unhandled %a" pp_ty ty
 
-(** Applies a validity check for a value, given a [check_ref] state monad
-    operation. This assumes [check_ref] is effect-free: the returned state is
-    the input state. See {!validity}. *)
-let check_validity ~check_ref ty value st =
-  let open Rustsymex in
-  let open Syntax in
-  (* we need to "unlift" [check_ref] *)
-  let check_ref ptr ty : (unit, 'e, 'b) Rustsymex.Result.t =
-    let open Rustsymex.Syntax in
-    let+ res, _st = check_ref ptr ty st in
-    res
-  in
-  (* and then lift the result *)
-  let+ res = validity ~check_ref ty value assert_or_error in
-  (res, st)
+(** Applies a validity check for a value, given a [check_ref] operation. See
+    {!validity}. *)
+let check_validity ~check_ref ty value =
+  validity ~check_ref ty value Layout.SM.assert_or_error
 
 (** Cast between literals; perform validation of the type's constraints. This is
     different from a transmute! It doesn't simply reinterpret the bits, but
@@ -792,11 +784,11 @@ let rec transmute_one ~(to_ty : Types.ty) (v : [< Typed.T.scalar ] Typed.t) :
     invariants: the data is initialised, and the discriminant of enums
     corresponds to that a variant. *)
 let rec nondet_raw :
-    Types.ty -> ([> Typed.T.any ] Typed.t, 'e, 'f) Rustsymex.Result.t =
-  let open Rustsymex in
+    Types.ty -> ([> Typed.T.any ] Typed.t, 'e, 'f) Layout.SM.Result.t =
+  let open Layout.SM in
   let open Syntax in
   let open Compo_res in
-  let nondets_raw tys = Rustsymex.Result.map_list tys ~f:nondet_raw in
+  let nondets_raw tys = Result.map_list tys ~f:nondet_raw in
   function
   | TScalar (TFloat fp) ->
       let+ f = nondet (Typed.t_float fp) in
@@ -859,7 +851,7 @@ let rec nondet_raw :
     with {!validity}. Note this uses "stateless" validity: references are not
     checked to be e.g. non-dangling. *)
 let nondet_valid ty =
-  let open Rustsymex in
+  let open Layout.SM in
   let open Syntax in
   let** v = nondet_raw ty in
   let++ () =
@@ -953,11 +945,11 @@ let rec ref_tys_in
     [ptr]. Receives an arbitrary state and [load] function, to possibly access a
     heap to get VTable information. *)
 let rec size_and_align_of_val ~load_vtable ~t ~(ptr : Typed.([< T.sptr_f ] t)) =
-  let open Rustsymex in
-  let open Rustsymex.Syntax in
+  let open Layout.SM in
+  let open Layout.SM.Syntax in
   (* Takes inspiration from rustc, to calculate the size and alignment of DSTs.
      https://github.com/rust-lang/rust/blob/a8664a1534913ccff491937ec2dc7ec5d973c2bd/compiler/rustc_codegen_ssa/src/size_of_val.rs *)
-  let* t = Layout.normalise t in
+  let*^ t = Layout.normalise t in
   if not (Layout.is_dst t) then
     let++ layout = Layout.layout_of t in
     (layout.size, layout.align)

@@ -4,10 +4,66 @@ open Typed.Infix
 open Typed.Syntax
 open Compo_res
 module BV = Typed.BV
-open Rustsymex
-open Rustsymex.Result
-open Rustsymex.Syntax
 open Common.Charon_util
+
+(** The layouts of the type variables, chosen nondeterministically. This is part
+    of the state, and not a cache: a layout chosen again would create new
+    symbolic variables, which would not match the layout chosen before. *)
+module Ctx = struct
+  module Ty_var = struct
+    type t = Types.type_var_id
+
+    let compare = Types.TypeVarId.compare_id
+    let pp = Types.pp_type_var_id
+    let show = Types.show_type_var_id
+  end
+
+  module Size = struct
+    type t = Typed.T.sint Typed.t
+    type syn = Typed.Expr.t [@@deriving show]
+
+    let to_syn v = Typed.Expr.of_value v
+    let learn_eq (s : syn) (v : t) = Rustsymex.Consumer.learn_eq s v
+    let exprs_syn v = [ v ]
+    let subst = Typed.Expr.subst
+    let pp = Typed.ppa
+    let show = Fmt.to_to_string pp
+    let sem_eq = Typed.sem_eq
+    let fresh () = Rustsymex.nondet (Typed.t_usize ())
+  end
+
+  module Size_agree = Soteria.Sym_states.Agree.Make (Rustsymex) (Size)
+  include Soteria.Sym_states.Pmap.Concrete (Rustsymex) (Ty_var) (Size_agree)
+
+  let find id : Typed.T.sint Typed.t option SM.t =
+    let open SM.Syntax in
+    let+ st = SM.get_state () in
+    Seq.find_map
+      (fun (id', size) -> if Ty_var.compare id id' = 0 then Some size else None)
+      (syntactic_bindings (of_opt st))
+
+  let save id (size : Typed.T.sint Typed.t) : unit SM.t =
+    SM.map Compo_res.get_ok
+    @@ wrap id (Size_agree.SM.Result.set_state (Some size))
+end
+
+(** Layout computations are a state monad on the layouts of the type variables,
+    {!Ctx}. *)
+module SM = struct
+  include Ctx.SM
+
+  let[@inline] not_impl ?tip ?issue fmt =
+    Fmt.kstr (fun msg -> lift @@ Rustsymex.not_impl ?tip ?issue "%s" msg) fmt
+
+  let[@inline] of_opt_not_impl ?tip ?issue msg x =
+    lift @@ Rustsymex.of_opt_not_impl ?tip ?issue msg x
+
+  let[@inline] match_on xs ~constr = lift @@ Rustsymex.match_on xs ~constr
+end
+
+open SM
+open SM.Result
+open SM.Syntax
 
 (* Import types *)
 include Layout_common
@@ -25,23 +81,16 @@ module Session = struct
     let cache : (Types.ty, t) Hashtbl.t = Hashtbl.create 128 in
     try f () with effect Get_cache, k -> continue k cache
 
+  (* Only concrete layouts are cached: the others depend on the layouts of the
+     type variables, which are in {!Ctx}. *)
   let get_or_compute_cached_layout ty f =
     let cache = get_cache () in
     match Hashtbl.find_opt cache ty with
     | Some layout -> ok layout
-    | None -> (
-        let* gen_layout = Poly.get_layout ty in
-        match gen_layout with
-        | Some layout -> ok layout
-        | None ->
-            let** layout = f () in
-            let is_concrete = Iter.is_empty (iter_vars layout) in
-            if is_concrete then (
-              Hashtbl.add cache ty layout;
-              Result.ok layout)
-            else
-              let+ () = Poly.push_layout ty layout in
-              Ok layout)
+    | None ->
+        let++ layout = f () in
+        if Iter.is_empty (iter_vars layout) then Hashtbl.add cache ty layout;
+        layout
 end
 
 let size_of_int_ty = size_of_int_ty
@@ -163,8 +212,8 @@ let mk_concrete ~size ~align =
 let not_impl_layout msg ty = not_impl "Can't compute layout: %s %a" msg pp_ty ty
 let layout_warning msg ty = [%l.warn "Layout: %s@.Type: %a" msg pp_ty ty]
 
-let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
-  let* ty = Poly.subst_ty ty in
+let rec layout_of (ty : Types.ty) : (t, 'e, 'f) SM.Result.t =
+  let*^ ty = Rustsymex.Poly.subst_ty ty in
   Session.get_or_compute_cached_layout ty @@ fun () ->
   match ty with
   (* Literals *)
@@ -243,9 +292,7 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
   (* Pattern types -- just their content, we assume they're primitives *)
   | TPattern (ty, _) -> layout_of ty
   (* Type variables : non-deterministically generate a layout *)
-  | TVar (Free _) ->
-      let* size = nondet (Typed.t_usize ()) in
-      let* () = assume Usize.[ 0s <=$@ size; size <$@ 1024s ] in
+  | TVar (Free id) ->
       (* this is real non-determinism of the alignment; we don't do it because
          it creates quite expensive formulae that we want to avoid. We make the
          assumption the biggest possible alignment is 16, which is that of
@@ -254,7 +301,17 @@ let rec layout_of (ty : Types.ty) : (t, 'e, 'f) Rustsymex.Result.t =
        * let* () = assume Usize.[ 0s <=$@ align_shift; align_shift <=$@ 4s ] in
        * let align = Typed.cast (Usize.(1s) <<@ align_shift) in *)
       let align = Usize.(1s) in
-      ok (mk ~size ~align ())
+      let* cached = Ctx.find id in
+      let+ size =
+        match cached with
+        | Some size -> return size
+        | None ->
+            let* size = nondet (Typed.t_usize ()) in
+            let* () = assume Usize.[ 0s <=$@ size; size <$@ 1024s ] in
+            let+ () = Ctx.save id size in
+            size
+      in
+      Ok (mk ~size ~align ())
   | TVar (Bound _) ->
       L.failwith "escaping bound type variable found in layout_of"
   (* Others (unhandled for now) *)
@@ -467,11 +524,12 @@ and compute_union_layout ty members =
 
 (** Normalise a type, by substituting any generics with the current generic
     environment, and resolving the trait type if needed. *)
-let normalise (ty : Types.ty) =
-  let* ty = Poly.subst_ty ty in
+let normalise (ty : Types.ty) : Types.ty Rustsymex.t =
+  let open Rustsymex.Syntax in
+  let+ ty = Rustsymex.Poly.subst_ty ty in
   match ty with
-  | TTraitType (tref, name, args) -> return (resolve_trait_ty tref name args)
-  | _ -> return ty
+  | TTraitType (tref, name, args) -> resolve_trait_ty tref name args
+  | _ -> ty
 
 let[@inline] size_of ty =
   let++ { size; _ } = layout_of ty in

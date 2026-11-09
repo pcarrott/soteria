@@ -155,7 +155,7 @@ module Make (Borrows : Tree_borrows.T) = struct
           Sptr.pp ptr Sptr.pp ptr' Tree_borrows.pp_state state];
       if not protect then Result.ok ptr_full'
       else
-        let**^ size = DecayMap.SM.lift @@ Layout.size_of pointee in
+        let**^ size = DecayMap.SM.lift_layout @@ Layout.size_of pointee in
         if%sat size ==@ Usize.(0s) then Result.ok ptr_full'
         else
           let size = Typed.BV.cast_nonzero size in
@@ -323,6 +323,8 @@ module Make (Borrows : Tree_borrows.T) = struct
   open SM
   open SM.Syntax
 
+  let lift_layout x = with_pointers_sym (DecayMap.SM.lift_layout x)
+
   let log action ptr =
     let+ st = SM.get_state () in
     [%l.trace
@@ -369,18 +371,34 @@ module Make (Borrows : Tree_borrows.T) = struct
 
   let with_ptr access ptr f = with_heap @@ Heap.with_ptr access ptr f
 
-  let rec size_and_align_of_val t (ptr : Typed.([< T.sptr_f ] t)) =
+  (** Runs the layout computation [f unlift], where [unlift] runs a computation
+      on the current state, with the layouts of [f]. Other than the layouts, the
+      changes made to the state by [unlift] are discarded. *)
+  let with_layouts_unlift f =
     let* st = get_state () in
-    let load_vtable dyn_pred field ptr =
+    let st = of_opt st in
+    let unlift x layouts =
       let open Rustsymex.Syntax in
+      let pointers = DecayMap.set_layouts layouts st.pointers in
+      let+ res, st' = x (to_opt { st with pointers }) in
+      (res, DecayMap.get_layouts (of_opt st').pointers)
+    in
+    lift_layout (f unlift)
+
+  let rec size_and_align_of_val t (ptr : Typed.([< T.sptr_f ] t)) =
+    let@ unlift = with_layouts_unlift in
+    let load_vtable dyn_pred field ptr =
+      let open Layout.SM.Syntax in
       let usize : Types.ty = TScalar (TInteger (Unsigned Usize)) in
       let** ofs = Layout.vtable_field_offset dyn_pred field in
-      let** ptr' = Sptr.raw_offset ptr ofs in
+      let**^ ptr' = Sptr.raw_offset ptr ofs in
       let ptr' = Typed.Ptr.of_ptr_t ptr' in
-      let+ res, _ = load ~ignore_borrow:true ~check_refs:false ptr' usize st in
+      let+ res =
+        unlift (load ~ignore_borrow:true ~check_refs:false ptr' usize)
+      in
       Compo_res.map Typed.cast res
     in
-    lift @@ Value_codec.size_and_align_of_val ~load_vtable ~t ~ptr
+    Value_codec.size_and_align_of_val ~load_vtable ~t ~ptr
 
   (** Checks the given pointer is aligned to [exp_align]. *)
   and check_align (ptr : Typed.([< T.sptr_t ] t)) exp_align =
@@ -424,7 +442,7 @@ module Make (Borrows : Tree_borrows.T) = struct
 
   and check_non_dangling (ptr : Typed.([< T.sptr_f ] t)) (ty : Types.ty) =
     let*^ ty = Layout.normalise ty in
-    let**^ layout = Layout.layout_of ty in
+    let** layout = lift_layout @@ Layout.layout_of ty in
     if%sat layout.uninhabited then Result.error (`RefToUninhabited ty)
     else
       let** size, _ = size_and_align_of_val ty ptr in
@@ -443,7 +461,10 @@ module Make (Borrows : Tree_borrows.T) = struct
         fake_read ptr ty
       else default_check
     in
-    Value_codec.check_validity ~check_ref ty value
+    let@ unlift = with_layouts_unlift in
+    Value_codec.check_validity
+      ~check_ref:(fun ptr ty -> unlift (check_ref ptr ty))
+      ty value
 
   and load :
       'a.
@@ -547,7 +568,7 @@ module Make (Borrows : Tree_borrows.T) = struct
   let tb_load (ptr : Typed.([< T.sptr_f ] t)) ty =
     [%l.debug "Executing Tb_load with pointer %a for %a" Typed.ppa ptr pp_ty ty];
     let@ () = with_loc_err ~trace:"Tree Borrow access" () in
-    let**^ size = Layout.size_of ty in
+    let** size = lift_layout @@ Layout.size_of ty in
     tb_load_untyped (Typed.Ptr.ptr_of ptr) size
 
   let store ?(ignore_align = false) (ptr : Typed.([< T.sptr_f ] t)) ty
@@ -556,7 +577,7 @@ module Make (Borrows : Tree_borrows.T) = struct
     [%l.debug "Executing Store with pointer %a for %a" Typed.ppa ptr pp_ty ty];
     let@ () = with_loc_err ~trace:"Memory store" () in
     let*^ ty = Layout.normalise ty in
-    let**^ layout = Layout.layout_of ty in
+    let** layout = lift_layout @@ Layout.layout_of ty in
     if%sat layout.size ==@ Usize.(0s) then Result.ok ()
     else
       (* Aggregates are stored whole and only decomposed lazily *)
@@ -607,9 +628,10 @@ module Make (Borrows : Tree_borrows.T) = struct
     (* We pick [from] rather than [to_], because we can transmute to a smaller
        type, but not to a larger one, so it's guaranteed that [size(from) >=
        size(to_)] *)
-    let**^ size = Layout.size_of from in
-    let**^ blocks =
-      Value_codec.encode ~offset:Usize.(0s) (v :> Typed.T.any Typed.t) from
+    let** size = lift_layout @@ Layout.size_of from in
+    let** blocks =
+      lift_layout
+      @@ Value_codec.encode ~offset:Usize.(0s) (v :> Typed.T.any Typed.t) from
     in
     transmute_raw_inner ~to_ ~size blocks
 
@@ -619,7 +641,7 @@ module Make (Borrows : Tree_borrows.T) = struct
         Fmt.(list ~sep:(any ", ") Typed.pp_block)
         blocks pp_ty to_];
     let@ () = with_loc_err ~trace:"Transmute" () in
-    let**^ size = Layout.size_of to_ in
+    let** size = lift_layout @@ Layout.size_of to_ in
     transmute_raw_inner ~to_ ~size (Iter.of_list blocks)
 
   module Sptr = struct
@@ -630,7 +652,7 @@ module Make (Borrows : Tree_borrows.T) = struct
       [%l.debug
         "Executing Offset of pointer %a by %a" Typed.ppa ptr Typed.ppa off_by];
       let@ () = with_loc_err ~trace:"Pointer offset" () in
-      let**^ size = Layout.size_of ty in
+      let** size = lift_layout @@ Layout.size_of ty in
       let ofs = Typed.Ptr.ofs ptr in
       match check_signed with
       | Some signed ->
@@ -795,7 +817,7 @@ module Make (Borrows : Tree_borrows.T) = struct
 
   let alloc_ty ?span ty =
     let@ () = with_loc_err ~trace:"Allocation" () in
-    let**^ layout = Layout.layout_of ty in
+    let** layout = lift_layout @@ Layout.layout_of ty in
     alloc ?span layout.size layout.align
 
   let free (ptr : Typed.([< T.sptr_f ] t)) =
@@ -882,7 +904,7 @@ module Make (Borrows : Tree_borrows.T) = struct
         let** freed = with_heap @@ Heap.is_freed (Typed.Ptr.loc ptr) in
         if freed then Result.ok ()
         else
-          let**^ size = Layout.size_of ty in
+          let** size = lift_layout @@ Layout.size_of ty in
           let@ ofs = with_ptr Ghost ptr in
           [%l.debug "Unprotecting pointer %a" Sptr.pp ptr];
           Block.unprotect ofs tag size
@@ -1005,18 +1027,18 @@ module Make (Borrows : Tree_borrows.T) = struct
     | None -> Result.error `NotAFnPointer
 
   let lookup_const_generic id ty =
-    let open Rustsymex in
-    let open Syntax in
     let@ () = with_loc_err ~trace:"Accessing const generic" () in
-    let@ const_generics = with_const_generics_sym in
-    match Types.ConstGenericVarId.Map.find_opt id const_generics with
-    | Some v ->
-        Result.ok
-          ((v : Typed.T.any Typed.t :> Typed.([> T.any ] t)), const_generics)
+    let* st = get_state () in
+    match
+      Types.ConstGenericVarId.Map.find_opt id (of_opt st).const_generics
+    with
+    | Some v -> Result.ok (v : Typed.T.any Typed.t :> Typed.([> T.any ] t))
     | None ->
-        let++ v = Value_codec.nondet_valid ty in
-        ( (v : Typed.T.any Typed.t :> Typed.([> T.any ] t)),
-          Types.ConstGenericVarId.Map.add id v const_generics )
+        let** v = lift_layout @@ Value_codec.nondet_valid ty in
+        let@ const_generics = with_const_generics_sym in
+        Rustsymex.Result.ok
+          ( (v : Typed.T.any Typed.t :> Typed.([> T.any ] t)),
+            Types.ConstGenericVarId.Map.add id v const_generics )
 
   let type_id ty =
     let open Rustsymex in

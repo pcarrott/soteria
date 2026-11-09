@@ -32,14 +32,6 @@ module MonadState = struct
     subst : Charon.Substitute.subst;
         (** In polymorphic mode, the current substitution to be applied to
             generics. See also {!Poly}. *)
-    generic_layouts : Layout_common.t TypeMap.t;
-        (** The map of generic layouts, for types with generics.
-            {b This is soundness critical}, it is not "just" a cache. A cache
-            implies that we are allowed to clear it, and things are okay. It is
-            not the case here: if we lose information on a generic
-            (nondeterministic) layout, recomputing it will create new symbolic
-            variables, which may not match the layout that was previously
-            computed. *)
     alloc_kind : Common.Alloc_kind.t;
         (** The current allocation kind. This is needed to mark all allocations
             done in a constant's initialiser as related to the constant, so that
@@ -50,21 +42,12 @@ module MonadState = struct
     {
       trace = Trace.empty;
       subst = Charon.Substitute.empty_subst;
-      generic_layouts = TypeMap.empty;
       alloc_kind = Heap;
     }
 end
 
 include Soteria.Sym_states.State_monad.Make (MonoSymex) (MonadState)
 include Syntaxes.FunctionWrap
-
-(* FIXME: for now, the [run] functions omit the [MonadState] that is obtained by
-   the end of the execution. Once we do polymorphic bi-abduction this won't be
-   sound, since [generic_layouts] contains information that must be serialized!
-
-   There are two solutions to this: either we move this information to the
-   state, and remove it from [MonadState], or add a [serialized] type to
-   [Rustsymex], along with the relevant [produce], [consume], etc. *)
 
 let run ?stats ?flamegraph ?fuel ~mode symex =
   run_with_state ~state:MonadState.empty symex
@@ -131,14 +114,6 @@ module Poly = struct
 
   let fill_params params =
     subst generic_args_substitute @@ bound_identity_args params
-
-  let get_layout ty =
-    let+ { generic_layouts; _ } = get_state () in
-    TypeMap.find_opt ty generic_layouts
-
-  let push_layout ty layout =
-    map_state (fun ({ generic_layouts; _ } as st) ->
-        { st with generic_layouts = TypeMap.add ty layout generic_layouts })
 end
 
 let match_on (elements : 'a list) ~(constr : 'a -> Svalue.Typed.(T.sbool t)) :

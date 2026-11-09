@@ -144,6 +144,7 @@ Test linked lists, to ensure dropping the list works despite the generic type
         (V|1| <u ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))) /\
         (V|1| != ((0b000 == extract[0-2](V|1|)) ? V|1| : ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))) /\
         (0x0000000000000000 <=s ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))) /\
+        (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) <=s 0x7fffffffffffffef) /\
         (((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))) != 0xfffffffffffffff0) /\
         (0xfffffffffffffff0 <s ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|)))) /\
         (V|1| <=s (0x0000000000000010 +cks ((0x0000000000000008 +ck V|1|) -ck extend[u61](extract[0-2](V|1|))))) /\

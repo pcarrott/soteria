@@ -30,9 +30,15 @@ let generate_summaries_for (fundef : Charon.UllbcAst.fun_decl) =
   let process =
     let open Rustsymex in
     let open Rustsymex.Syntax in
-    let* args = Result.map_list arg_tys ~f:Value_codec.nondet_valid in
+    (* The layouts chosen for the arguments are kept in the initial state *)
+    let* args, state =
+      State.wrap_no_fail
+        (State.State.lift_layout
+           (Layout.SM.Result.map_list arg_tys ~f:Value_codec.nondet_valid))
+        State.empty
+    in
     let* args = match args with Ok args -> return args | _ -> vanish () in
-    let* result = Interp.exec_fun_compo ~args ~state:State.empty fundef in
+    let* result = Interp.exec_fun_compo ~args ~state fundef in
     match result with
     | Ok (ret, state) -> return (args, Ok ret, state)
     | Error (err, state) -> return (args, Error err, state)

@@ -414,6 +414,17 @@ module Make (State : State_intf.S) :
   let[@inline] lift_symex (s : 'a Rustsymex.t) : ('a, 'env) t =
     ESM.Result.lift_state @@ State.SM.lift s
 
+  let lift_layout_err (sym : ('a, Error.t, 'f) Layout.SM.Result.t) :
+      ('a, 'env) t =
+    ESM.lift
+    @@ State.with_pointers_sym
+    @@ State.Sptr.DecayMap.SM.lift_layout
+         (let open Layout.SM.Syntax in
+          let*^ trace = Rustsymex.get_trace () in
+          let+- err = sym in
+          Error.log_at trace err;
+          Error.decorate trace err)
+
   let of_opt_not_impl ?tip ?issue msg x =
     lift_symex (of_opt_not_impl ?tip ?issue msg x)
 
@@ -485,23 +496,23 @@ module Make (State : State_intf.S) :
     let[@inline] distance ptr1 ptr2 = with_pointers_sym (distance ptr1 ptr2)
     let[@inline] decay ptr = with_pointers_sym (decay ptr)
     let[@inline] expose ptr = with_pointers_sym (expose ptr)
-    let[@inline] dangling_if_zst ty = lift_err (dangling_if_zst ty)
+    let[@inline] dangling_if_zst ty = lift_layout_err (dangling_if_zst ty)
   end
 
   module Layout = struct
     include Layout
 
-    let[@inline] layout_of ty = lift_err (layout_of ty)
-    let[@inline] size_of ty = lift_err (size_of ty)
-    let[@inline] align_of ty = lift_err (align_of ty)
-    let[@inline] is_zst ty = lift_err (is_zst ty)
-    let[@inline] is_1zst ty = lift_err (is_1zst ty)
+    let[@inline] layout_of ty = lift_layout_err (layout_of ty)
+    let[@inline] size_of ty = lift_layout_err (size_of ty)
+    let[@inline] align_of ty = lift_layout_err (align_of ty)
+    let[@inline] is_zst ty = lift_layout_err (is_zst ty)
+    let[@inline] is_1zst ty = lift_layout_err (is_1zst ty)
 
     let[@inline] is_abi_compatible ty1 ty2 =
-      lift_err (is_abi_compatible ty1 ty2)
+      lift_layout_err (is_abi_compatible ty1 ty2)
 
     let[@inline] unsize_path ~from_ty ~to_ty =
-      lift_err (unsize_path ~from_ty ~to_ty)
+      lift_layout_err (unsize_path ~from_ty ~to_ty)
 
     let[@inline] normalise ty = lift_symex (normalise ty)
   end
@@ -510,9 +521,9 @@ module Make (State : State_intf.S) :
     include Value_codec
 
     let[@inline] encode ?depth ~offset v ty =
-      lift_err (encode ?depth ~offset v ty)
+      lift_layout_err (encode ?depth ~offset v ty)
 
-    let[@inline] nondet_valid ty = lift_err (nondet_valid ty)
+    let[@inline] nondet_valid ty = lift_layout_err (nondet_valid ty)
     let[@inline] float_to_bv_bits f = with_pointers_sym (float_to_bv_bits f)
     let[@inline] optimised_rem x y = with_pointers_sym (optimised_rem x y)
 

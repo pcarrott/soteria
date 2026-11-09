@@ -21,9 +21,11 @@ type 'addr addr_raw = { address : 'addr; exposed : bool }
     [from_exposed] is partial: if a provenance cannot be guessed from the
     integer, [None] is returned. *)
 module type DecayMapS = sig
-  include
-    Soteria.Sym_states.Base.M(Rustsymex).S
-      with type syn = Expr.t * Expr.t addr_raw
+  type syn =
+    | Ser_decays of (Expr.t * Expr.t addr_raw)
+    | Ser_layouts of Layout.Ctx.syn
+
+  include Soteria.Sym_states.Base.M(Rustsymex).S with type syn := syn
 
   module SM : sig
     include module type of SM
@@ -39,9 +41,13 @@ module type DecayMapS = sig
 
     val match_on : 'a list -> constr:('a -> sbool Typed.t) -> 'a option t
     val get_where : unit -> Trace.t t
+
+    (** Runs a layout computation on the layouts of the type variables. *)
+    val lift_layout : 'a Layout.SM.t -> 'a t
   end
 
-  val empty : t
+  val get_layouts : t option -> Layout.Ctx.t option
+  val set_layouts : Layout.Ctx.t option -> t option -> t option
 
   (** Decays the given location into an integer, updating the decay map
       accordingly. If [expose] is true, the provenance is marked as exposed, and
@@ -106,24 +112,11 @@ module DecayMap : DecayMapS = struct
 
   module EntryExcl = Soteria.Sym_states.Agree.Make (Rustsymex) (Entry)
 
-  include
+  module Decays =
     Soteria.Sym_states.Pmap.Direct_access_patricia_tree (Rustsymex) (MapKey)
       (EntryExcl)
 
-  module SM = struct
-    include SM
-
-    let[@inline] not_impl ?tip ?issue fmt =
-      Fmt.kstr (fun msg -> lift @@ Rustsymex.not_impl ?tip ?issue "%s" msg) fmt
-
-    let[@inline] of_opt_not_impl ?tip ?issue msg x =
-      lift @@ of_opt_not_impl ?tip ?issue msg x
-
-    let[@inline] match_on xs ~constr = lift @@ match_on xs ~constr
-    let[@inline] get_where () = lift @@ get_trace ()
-  end
-
-  open SM
+  open Decays.SM
   open Syntax
 
   let nondet_aligned_address align =
@@ -139,12 +132,12 @@ module DecayMap : DecayMapS = struct
         Typed.BV.concat high_bits (Typed.BV.zero low_bits)
     | _ -> nondet (Typed.t_usize ())
 
-  let decay ~expose ~size ~align (loc : [< sloc ] Typed.t) : T.sint Typed.t SM.t
-      =
+  let decay ~expose ~size ~align (loc : [< sloc ] Typed.t) :
+      T.sint Typed.t Decays.SM.t =
     if%sat Typed.Ptr.is_null_loc loc then return Usize.(0s)
     else
       let* state = get_state () in
-      wrap loc
+      Decays.wrap loc
         (let open EntryExcl.SM in
          let open Syntax in
          let* entry = get_state () in
@@ -161,7 +154,7 @@ module DecayMap : DecayMapS = struct
                 under-approximate this by only requiring the base addresses to
                 differ. *)
              let disctinct =
-               syntactic_bindings (of_opt state)
+               Decays.syntactic_bindings (Decays.of_opt state)
                |> Seq.map (fun (_, Entry.{ address; _ }) -> address)
                |> Seq.cons address
                |> Typed.distinct_seq
@@ -180,7 +173,7 @@ module DecayMap : DecayMapS = struct
       |> map Compo_res.get_ok
 
   let from_exposed (loc_int : [< sint ] Typed.t) :
-      (sloc Typed.t * sint Typed.t) option SM.t =
+      (sloc Typed.t * sint Typed.t) option Decays.SM.t =
     (* UX: we only consider the first one; this is more or less correct, as per
        the documentation of [with_exposed_provenance]: "The provenance of the
        returned pointer is that of some pointer that was previously exposed"
@@ -188,7 +181,7 @@ module DecayMap : DecayMapS = struct
        See
        https://doc.rust-lang.org/nightly/std/ptr/fn.with_exposed_provenance.html *)
     let+ map = get_state () in
-    let bindings = syntactic_bindings (of_opt map) in
+    let bindings = Decays.syntactic_bindings (Decays.of_opt map) in
     (* an address is built from a single fresh symbol, which we match on *)
     let is_built_from var address =
       match Iter.to_list (Typed.iter_vars address) with
@@ -203,6 +196,31 @@ module DecayMap : DecayMapS = struct
           bindings)
     |> Iter.map (fun (loc, ({ address; _ } : Entry.t)) -> (loc, address))
     |> Iter.to_opt
+
+  type t = { decays : Decays.t option; layouts : Layout.Ctx.t option }
+  [@@deriving sym_state { symex = Rustsymex }]
+
+  module SM = struct
+    include SM
+
+    let[@inline] not_impl ?tip ?issue fmt =
+      Fmt.kstr (fun msg -> lift @@ Rustsymex.not_impl ?tip ?issue "%s" msg) fmt
+
+    let[@inline] of_opt_not_impl ?tip ?issue msg x =
+      lift @@ of_opt_not_impl ?tip ?issue msg x
+
+    let[@inline] match_on xs ~constr = lift @@ match_on xs ~constr
+    let[@inline] get_where () = lift @@ get_trace ()
+    let[@inline] lift_layout x = with_layouts_sym x
+  end
+
+  let get_layouts st = (of_opt st).layouts
+  let set_layouts layouts st = to_opt { (of_opt st) with layouts }
+
+  let decay ~expose ~size ~align loc =
+    with_decays_sym (decay ~expose ~size ~align loc)
+
+  let from_exposed loc_int = with_decays_sym (from_exposed loc_int)
 end
 
 type t = Typed.(T.sptr_t t)
@@ -212,7 +230,7 @@ let pp = Typed.ppa
 (** Creates a dangling pointer to the given type, if that type is a ZST; returns
     [None] otherwise. *)
 let dangling_if_zst ty =
-  let open Rustsymex in
+  let open Layout.SM in
   let open Syntax in
   let** layout = Layout.layout_of ty in
   if%sat layout.size ==@ Usize.(0s) then
