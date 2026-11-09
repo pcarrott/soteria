@@ -223,11 +223,31 @@ let apply_subst apply ~missing_var s = function
       (Unop (op, v), s)
 
 let learn build learn s (x : 'g t) (v : 'g sv) =
+  let learn_all s es vs =
+    Monad.OptionM.fold_iter
+      (Iter.of_list (List.combine es vs))
+      ~init:s
+      ~f:(fun s (e, v) -> learn s e v)
+  in
   match x with
   | Tuple vs ->
       let enumerated = Iter.of_list vs |> Iter.enumerate in
       Monad.OptionM.fold_iter enumerated ~init:s ~f:(fun s (i, e) ->
           learn s e (field_of ~build i v))
+  | Enum (var, es) -> (
+      match v.node.kind with
+      | Extension (Enum (var', _)) when not (Types.equal_variant_id var var') ->
+          None
+      | _ -> learn_all s es (as_enum_of_variant ~build var v))
+  | Ptr (p, m) ->
+      learn_all s [ p; m ]
+        [ full_ptr_inner ~build v; full_ptr_meta_raw ~build v ]
+  | Array es ->
+      learn_all s (Iarray.to_list es) (Iarray.to_list (as_array ~build v))
+  | ThinPtr { ptr; size; align; tag = _ } ->
+      let part p = thin_ptr_part ~build p v in
+      learn_all s [ ptr; size; align ]
+        [ part PtrInner; part PtrSize; part PtrAlign ]
   | _ -> None
 
 let encode_ty = Encoding.encode_ty
