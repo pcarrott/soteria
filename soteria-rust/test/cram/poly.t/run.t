@@ -195,3 +195,15 @@ A promoted constant pointing to a local of its initialiser
   note: promoted_ref::main: done in <time>, ran 1 branch
   PC 1: empty
   
+
+Trait methods called with generics that differ from those of their impl or trait
+  $ soteria-rust exec trait_swapped_generics.rs --frontend charon --poly
+  Compiling... done in <time>
+  => Running trait_swapped_generics::impl_method...
+  note: trait_swapped_generics::impl_method: done in <time>, ran 1 branch
+  PC 1: (V|1| <=u 0x00000000000003ff)
+  
+  => Running trait_swapped_generics::default_method...
+  note: trait_swapped_generics::default_method: done in <time>, ran 1 branch
+  PC 1: (V|1| <=u 0x00000000000003ff)
+  

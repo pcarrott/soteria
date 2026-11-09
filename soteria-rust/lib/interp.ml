@@ -156,17 +156,34 @@ module Make (StateImpl : State.S) = struct
         | `Synth kind -> ok (Synthetic kind)
         | `Impl timplref -> (
             let timpl = Crate.get_trait_impl timplref in
+            (* [get_trait_impl] and [get_trait_decl] already substitute the
+               generics of the item: substituting them again would capture the
+               free variables of the caller. *)
+            let instantiate =
+              Substitute.(
+                apply_args_to_binder fn.generics
+                  st_substitute_visitor#visit_fun_decl_ref)
+            in
             match
-              Substitute.lookup_and_subst_trait_impl_method timpl method_id
-                timplref.generics fn.generics
+              Types.TraitMethodId.Map.find_opt method_id timpl.methods
+              |> Option.map instantiate
             with
             | Some fn -> ok (Real fn)
             | None -> (
                 (* get the default method *)
                 let trait_decl = Crate.get_trait_decl trait_ref in
+                let subst_self =
+                  Substitute.(
+                    subst_free_vars
+                      { empty_free_sb_subst with tr_sb_self = tref.kind })
+                in
                 match
-                  Substitute.lookup_and_subst_trait_decl_method trait_decl
-                    method_id tref fn.generics
+                  GAstUtils.lookup_trait_decl_method_ref trait_decl method_id
+                  |> Option.map (fun m ->
+                      Substitute.st_substitute_visitor#visit_binder
+                        Substitute.st_substitute_visitor#visit_fun_decl_ref
+                        subst_self m.TypesUtils.item_binder_value
+                      |> instantiate)
                 with
                 | Some fn -> ok (Real fn)
                 | None ->
