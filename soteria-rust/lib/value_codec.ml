@@ -478,6 +478,39 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
             let offset = ofs +!!@ offset in
             Iter.cons { Typed.value = Scalar tag; offset; size } fields)
 
+(* The allocation a pointer points into is not given by its type. We only know
+   that a pointer without provenance has no allocation, that a reference is
+   aligned and dereferenceable, and that a box points to the start of an
+   allocation that has its pointee's layout. *)
+let alloc_info_valid kind ptr =
+  let loc, ofs = Typed.Ptr.decompose ptr in
+  let size, align = Typed.Ptr.allocation_info ptr in
+  let isize_max = Typed.BV.usize (Layout.max_value_z (Signed Isize)) in
+  let well_formed =
+    Typed.not (align ==@ Usize.(0s))
+    &&@ (align &@ (align -!@ Usize.(1s)) ==@ Usize.(0s))
+    &&@ (size <=@ isize_max)
+  in
+  let fits =
+    match kind with
+    | `Raw -> Typed.v_true
+    | `Ref (layout : Layout.t) ->
+        align %@ layout.align
+        ==@ Usize.(0s)
+        &&@ (layout.size <=@ size)
+        &&@ (ofs <=@ size -!@ layout.size)
+    | `Box (layout : Layout.t) ->
+        ofs
+        ==@ Usize.(0s)
+        &&@ (size ==@ layout.size)
+        &&@ (align ==@ layout.align)
+  in
+  well_formed
+  &&@ Typed.ite
+        (Typed.Ptr.is_null_loc loc)
+        (size ==@ Usize.(0s) &&@ (align ==@ Usize.(1s)))
+        fits
+
 (** Iterates over the validity constraints of this particular value for a given
     type, traversing it recursively. For every requirement, this associates to
     it the error to be raised if the requirement is not met.
@@ -493,6 +526,8 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
     Note that this function doesn't (and can't) check basic validity
     requirements of references and boxes, even alignment, as e.g. for a
     [&dyn Trait] the alignment cannot be known without some auxiliary state.
+    With [~alloc_info:true], it only constrains the allocation information of
+    pointers to sized types, with {!alloc_info_valid}.
 
     This doesn't check:
     - the fact the bytes of the value cannot be undefined, as that is checked
@@ -505,7 +540,8 @@ let rec encode ?depth ~offset (value : Typed.(T.any t)) (ty : Types.ty) :
     Reference:
     https://doc.rust-lang.org/reference/behavior-considered-undefined.html#r-undefined.validity
 *)
-let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
+let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ())
+    ?(alloc_info = false) ty v f =
   (* We annotate each relevant helper function or match branch with the matching
      rule in the above-referenced document. *)
   let open Layout.SM in
@@ -527,11 +563,19 @@ let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
           (Typed.not (Typed.Ptr.is_null vt))
           (`UBTransmute "Null vtable pointer")
   in
+  let alloc_info_validity kind (fptr : Typed.([< T.sptr_f ] t)) pointee =
+    if alloc_info && not (Layout.is_dst pointee) then
+      let** layout = Layout.layout_of pointee in
+      let ptr = Typed.Ptr.ptr_of fptr in
+      f (alloc_info_valid (kind layout) ptr) `UBDanglingPointer
+    else ok ()
+  in
   (* undefined.validity.reference-box *)
-  let ref_box_validity (fptr : Typed.([< T.sptr_f ] t)) pointee =
+  let ref_box_validity kind (fptr : Typed.([< T.sptr_f ] t)) pointee =
     let** () = metadata_validity ~is_raw_ptr:false pointee fptr in
     let** layout = Layout.layout_of pointee in
     let** () = f (Typed.not layout.uninhabited) (`RefToUninhabited pointee) in
+    let** () = alloc_info_validity kind fptr pointee in
     check_ref fptr pointee
   in
   (* validity of pattern types (not stabilized) *)
@@ -577,16 +621,18 @@ let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
   (* undefined.validity.reference-box *)
   | TRef (_, pointee, _) ->
       let ptr = Typed.cast_ptr_f v in
-      ref_box_validity ptr pointee
+      ref_box_validity (fun l -> `Ref l) ptr pointee
   (* NOTE: this check must go before the struct check, since boxes are
      structs *)
   | TAdt { builtin = Some TBox; _ } ->
       let pointee = get_pointee ty in
       let ptr = ptr_of_box v in
-      ref_box_validity ptr pointee
+      ref_box_validity (fun l -> `Box l) ptr pointee
   (* undefined.validity.wide *)
   | TRawPtr (pointee, _) ->
-      metadata_validity ~is_raw_ptr:true pointee (Typed.cast_ptr_f v)
+      let ptr = Typed.cast_ptr_f v in
+      let** () = metadata_validity ~is_raw_ptr:true pointee ptr in
+      alloc_info_validity (fun _ -> `Raw) ptr pointee
   (* undefined.validity.enum *)
   | TAdt adt when Crate.is_enum adt ->
       let v = Typed.cast_enum ~adt v in
@@ -604,17 +650,20 @@ let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
           Iter.of_list (field_tys variant.fields)
           |> Iter.mapi (fun i ty ->
               (ty, Typed.Adt.field_of_variant variant.id i v))
-          |> iter_iter ~f:(fun (ty, v) -> validity ~check_ref ty v f))
+          |> iter_iter ~f:(fun (ty, v) ->
+              validity ~check_ref ~alloc_info ty v f))
   (* undefined.validity.struct + undefined.validity.str, we represent [str] as a
      [struct([u8])] *)
   | TAdt adt when Crate.is_struct adt ->
       let v = Typed.cast_tuple v in
       Iter.of_list (Crate.as_struct_tys adt)
       |> Iter.mapi (fun i ty -> (ty, Typed.Adt.field_of i v))
-      |> iter_iter ~f:(fun (ty, v) -> validity ~check_ref ty v f)
+      |> iter_iter ~f:(fun (ty, v) -> validity ~check_ref ~alloc_info ty v f)
   | TArray (ty, _, _) | TSlice (ty, _) ->
       Typed.Adt.as_array (Typed.cast_array v)
-      |> iter (module Iarray) ~f:(fun v -> validity ~check_ref ty v f)
+      |> iter
+           (module Iarray)
+           ~f:(fun v -> validity ~check_ref ~alloc_info ty v f)
   (* undefined.validity.union *)
   | TAdt adt when Crate.is_union adt -> ok ()
   (* fndefs are ZSTs *)
@@ -623,7 +672,7 @@ let rec validity ?(check_ref = fun _ _ -> Layout.SM.Result.ok ()) ty v f =
   | TVar (Free _) -> ok ()
   (* undefined.validity.pattern-type *)
   | TPattern (inner_ty, pat) ->
-      let** () = validity ~check_ref inner_ty v f in
+      let** () = validity ~check_ref ~alloc_info inner_ty v f in
       f
         (pattern_valid_cond inner_ty v pat)
         (`UBTransmute "Value violates pattern type constraint")
@@ -798,9 +847,12 @@ let rec nondet_raw :
       Ok (i : Typed.(T.sint t) :> Typed.([> T.any ] t))
   | (TRef (_, pointee, _) | TRawPtr (pointee, _))
     when not (Layout.is_dst pointee) ->
-      let** { size; align; _ } = Layout.layout_of pointee in
+      (* The allocation information is constrained by {!validity} *)
       let* loc = nondet (Typed.t_loc ()) in
-      let+ ofs = nondet (Typed.t_usize ()) in
+      let* ofs = nondet (Typed.t_usize ()) in
+      let* size = nondet (Typed.t_usize ()) in
+      let+ align = nondet (Typed.t_usize ()) in
+      let align = Typed.cast_nonzero align in
       let ptr = Typed.Ptr.mk_ptr_t ~loc ~ofs ~align ~size ~tag:None in
       Ok (Typed.Ptr.of_ptr_t ptr)
   | TArray (ty, len, _) ->
@@ -858,7 +910,7 @@ let nondet_valid ty =
   let open Syntax in
   let** v = nondet_raw ty in
   let++ () =
-    validity ty v (fun c _err ->
+    validity ~alloc_info:true ty v (fun c _err ->
         let+ () = assume [ c ] in
         Compo_res.Ok ())
   in

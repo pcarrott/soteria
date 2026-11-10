@@ -165,7 +165,7 @@ This is a false positive
   Compiling... done in <time>
   
   Statistics:
-  • Z3 check-sat calls: 4
+  • Z3 check-sat calls: 5
   • branch_on: branches 25% of calls (7 of 28)
   • Execution time: <time>
   • Steps: 3

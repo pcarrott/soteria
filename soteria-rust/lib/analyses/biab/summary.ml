@@ -233,10 +233,11 @@ let rec analyse : type a. fn:Charon.UllbcAst.fun_decl -> a t -> analysed t =
                     let open Syntax in
                     let* res, _ =
                       Layout.SM.run_with_state ~state:None
-                      @@ Value_codec.validity ty arg (fun constr _err ->
-                          let open Layout.SM.Syntax in
-                          let* () = Layout.SM.assume [ constr ] in
-                          Layout.SM.Result.ok ())
+                      @@ Value_codec.validity ~alloc_info:true ty arg
+                           (fun constr _err ->
+                             let open Layout.SM.Syntax in
+                             let* () = Layout.SM.assume [ constr ] in
+                             Layout.SM.Result.ok ())
                     in
                     match res with
                     | Ok () -> return ()
