@@ -43,6 +43,15 @@ printed as Rust variables: producing a summary renames them to fresh ones, so
 composing witnesses needs no renaming. When a call goes wrong, its witness is
 instantiated with a model of the path condition of the failing path.
 
+A witness is safe Rust that reads every value the analysis reads, so a bug it
+reaches lies in the library. A reference argument is moved out by
+`std::mem::drop` after the call, and a value whose drop cannot be run is moved
+to a variable that is only dropped at the end of the test. A returned `&mut`
+is written with `std::mem::replace`. A returned `&` is read by copying the
+value if it is `Copy`; otherwise the reference is passed to
+`std::hint::black_box`, which checks that it may still be read without reading
+the value itself.
+
 **Passes** (`library.ml`, `refute.ml`). Pass 0 runs the constructors.
 Passes 1 to `--pass-fuel` (default 5) run every other function on each
 combination of argument summaries that uses at least one summary found in the
@@ -58,6 +67,14 @@ during a pass are only used from the next pass on.
    summary per reference argument (the value left behind the reference).
    Everything else is dropped, running `Drop` impls.
 4. Any path that does not terminate successfully is a type unsoundness.
+
+**Drops** (`drop.ml`). Charon only translates the drop glue of the types that
+the crate itself drops. For other types, RUXt runs the drop from their structure,
+in place like `std::ptr::drop_in_place`: their `Drop` impl if any, then their
+fields, where a `Box` drops its contents before freeing its block, and a raw
+pointer owns nothing. A type of another crate that holds
+a pointer, like `Vec`, may own it through a `Drop` impl that was not translated: it
+is forgotten instead, and the blocks reachable from it are not reported as leaks.
 
 **Subsumption** (`Summary.Context.stage`). A new summary is discarded if it
 implies an existing summary of the same type, and existing summaries implied

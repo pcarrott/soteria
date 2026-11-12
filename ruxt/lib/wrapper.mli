@@ -3,11 +3,7 @@ open Charon
 type t
 
 val name : t -> Types.name
-
-val make :
-  UllbcAst.fun_decl Types.TypeDeclId.Map.t ->
-  UllbcAst.fun_decl ->
-  t * Types.ty list
+val make : Drop.t -> UllbcAst.fun_decl -> t * Types.ty list
 
 val exec :
   fuel:Soteria.Symex.Fuel_gauge.t ->

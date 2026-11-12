@@ -98,17 +98,19 @@ let add_block_edges graph spatial =
       Iter.product locs (Iter.persistent_lazy outs) (fun ((x, _), (y, _)) ->
           add_edge x y))
 
-(* The variables reachable from the return value, following path condition
-   equalities and the contents of the blocks of the post state. *)
-let reachable_vars ~ret ~spatial ~pcs =
+(* The reachability graph of variables, following path condition equalities and
+   the contents of the blocks of the post state. *)
+let var_graph ~spatial ~pcs =
   let graph = Var_graph.with_node_capacity 0 in
   Var_graph.add_pc_edges graph pcs;
   add_block_edges graph spatial;
-  (* We mark all variables from the return value as reachable *)
+  graph
+
+(* The variables reachable in [graph] from those of [values] *)
+let reachable_vars graph values =
   let init_reachable = Var_hashset.with_capacity 0 in
-  Value.iter_vars ret (fun (x, _) -> Var_hashset.add init_reachable x);
-  (* [init_reachable] is the set of initially-reachable variables, and we have a
-     reachability [graph]. We can compute all reachable values. *)
+  ListLabels.iter values ~f:(fun v ->
+      Value.iter_vars v (fun (x, _) -> Var_hashset.add init_reachable x));
   Var_graph.reachable_from graph init_reachable
 
 let is_leak =
@@ -125,13 +127,15 @@ let is_leak =
           } )]
 
 (* Keeps only the blocks of the post state whose location is reachable; a
-   dropped block that is still alive on the heap is a memory leak. *)
-let reachable_blocks_or_leaks ~reachable spatial =
-  let kept, dropped =
-    ListLabels.partition spatial ~f:(fun syn ->
-        let locs, _ = State.iter_vars syn in
-        Iter.exists (fun (x, _) -> Var_hashset.mem reachable x) locs)
+   dropped block that is still alive on the heap is a memory leak, unless it is
+   reachable from a forgotten value, whose drop may have freed it. *)
+let reachable_blocks_or_leaks ~reachable ~forgotten spatial =
+  let reaches set syn =
+    let locs, _ = State.iter_vars syn in
+    Iter.exists (fun (x, _) -> Var_hashset.mem set x) locs
   in
+  let kept, dropped = ListLabels.partition spatial ~f:(reaches reachable) in
+  let dropped = ListLabels.filter dropped ~f:(Fun.negate (reaches forgotten)) in
   if (Config.get ()).ignore_leaks then Result.ok kept
   else
     Monad.ResultM.fold_list dropped ~init:kept ~f:(fun kept syn ->
@@ -170,14 +174,17 @@ let pure_of_pcs ~reachable ~spatial pcs =
   | _ -> distinct :: filtered
 
 let make (ret : Value.t) (witness : Witness.t) (st : State.SM.st)
-    (pcs : Typed.Expr.t list) : (t, [> `MemoryLeak ]) result =
+    ~(forgotten : Value.t list) (pcs : Typed.Expr.t list) :
+    (t, [> `MemoryLeak ]) result =
   let open Result.Syntax in
   let ret = Value.to_syn ret in
   let witness = Witness.to_syn witness in
   let spatial = State.to_syn @@ State.of_opt st in
-  let reachable = reachable_vars ~ret ~spatial ~pcs in
+  let graph = var_graph ~spatial ~pcs in
+  let reachable = reachable_vars graph [ ret ] in
+  let forgotten = reachable_vars graph (List.map Value.to_syn forgotten) in
   (* We can now filter the summary to keep only the reachable values *)
-  let+ spatial = reachable_blocks_or_leaks ~reachable spatial in
+  let+ spatial = reachable_blocks_or_leaks ~reachable ~forgotten spatial in
   let pure = pure_of_pcs ~reachable ~spatial pcs in
   let asrt = Logic.Asrt.make ~spatial ~pure in
   { ret; asrt; witness }

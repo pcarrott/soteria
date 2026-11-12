@@ -29,8 +29,9 @@ end
 
 (** A witness is either a primitive value or a function call preceded by the
     witnesses of its arguments and followed by a sequence of drops and memory
-    accesses. Succeeding memory accesses only occur when the function call
-    outputs a reference.
+    accesses. The witness is safe code, and each statement reads every value
+    that it moves or drops, as the analysis does. Succeeding memory accesses
+    only occur when the function call outputs a reference.
 
     The variables of a witness are symbolic variables, which are printed as Rust
     variables: producing a summary renames them to fresh ones, so they are
@@ -49,7 +50,18 @@ and 'v call = {
 }
 
 and 'v arg = Types.ref_kind option * 'v expr
-and 'v stmt = Drop of 'v | Read of 'v | Write of 'v * 'v expr
+
+and 'v stmt =
+  | Drop of 'v
+  | Keep of 'v * 'v
+      (** [Keep (keep, var)] moves [var] to [keep], which is only dropped at the
+          end of the witness *)
+  | Read of 'v * 'v option
+      (** Reads through a shared reference: the value is copied to the given
+          variable, or the reference is retagged when the value is not [Copy] *)
+  | Write of 'v * 'v expr * 'v option
+      (** Replaces the value behind a reference; the old value is dropped, or
+          moved to the given variable *)
 
 type t = Value.t expr
 type syn = Value.syn expr
@@ -67,8 +79,10 @@ and map_values_arg f (ref_kind, value) = (ref_kind, map_values f value)
 
 and map_values_stmt f = function
   | Drop var -> Drop (f var)
-  | Read var -> Read (f var)
-  | Write (var, value) -> Write (f var, map_values f value)
+  | Keep (keep, var) -> Keep (f keep, f var)
+  | Read (var, copy) -> Read (f var, Option.map f copy)
+  | Write (var, value, old) ->
+      Write (f var, map_values f value, Option.map f old)
 
 let to_syn : t -> syn = map_values Value.to_syn
 let subst : (Value.syn -> Value.t) -> syn -> t = map_values
@@ -256,10 +270,11 @@ let rec mut_vars = function
           if ref_kind = Some Types.RMut then result value :: vars else vars)
         args
       @ List.concat_map
-          (function Write (_, value) -> mut_vars value | _ -> [])
+          (function Write (_, value, _) -> mut_vars value | _ -> [])
           stmts
 
-let stmt_var = function Drop var | Read var | Write (var, _) -> var
+let stmt_var = function
+  | Drop var | Keep (_, var) | Read (var, _) | Write (var, _, _) -> var
 
 (* Prints the statements running the witness [w]; [top] holds if nothing refers
    to the result of [w] *)
@@ -298,11 +313,18 @@ and pp_arg ~pp_value ft (ref_kind, value) =
 
 and pp_stmt ~pp_value ~muts ft = function
   | Drop var -> Fmt.pf ft "@,std::mem::drop(%a);" pp_var var
-  | Read var -> Fmt.pf ft "@,let _ = *%a;" pp_var var
-  | Write (var, value) ->
+  | Keep (keep, var) -> Fmt.pf ft "@,let _%a = %a;" pp_var keep pp_var var
+  | Read (var, Some copy) -> Fmt.pf ft "@,let _%a = *%a;" pp_var copy pp_var var
+  | Read (var, None) -> Fmt.pf ft "@,std::hint::black_box(%a);" pp_var var
+  | Write (var, value, old) -> (
       pp_arg_stmts ~pp_value ~muts ft (None, value);
-      Fmt.pf ft "@,std::mem::forget(std::mem::replace(%a, %a));" pp_var var
-        (pp_arg ~pp_value) (None, value)
+      match old with
+      | None ->
+          Fmt.pf ft "@,std::mem::drop(std::mem::replace(%a, %a));" pp_var var
+            (pp_arg ~pp_value) (None, value)
+      | Some old ->
+          Fmt.pf ft "@,let _%a = std::mem::replace(%a, %a);" pp_var old pp_var
+            var (pp_arg ~pp_value) (None, value))
 
 let pp_syn ft (w : syn) =
   let pp_value ft (_, v) = Value.pp_syn ft v in

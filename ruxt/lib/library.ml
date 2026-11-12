@@ -1,8 +1,10 @@
 open Soteria.Soteria_std
 open Syntaxes.FunctionWrap
 module Config_ = Config
+module Interp_ = Interp
 open Soteria_rust_lib
 module Config = Config_
+module Interp = Interp_
 open Result.Syntax
 open Charon
 
@@ -13,20 +15,6 @@ type t = {
 
 let get () =
   let crate = Crate.get_crate () in
-  let is_drop ({ src; _ } : UllbcAst.fun_decl) =
-    match src with
-    | TraitImplFun (_, decl, _, _) ->
-        let decl = Crate.get_trait_decl decl in
-        decl.item_meta.lang_item = Some RustcLangItemDestruct
-    | _ -> false
-  in
-  let update_drops (fun_decl : UllbcAst.fun_decl)
-      ((constructors, fun_decls, drops) as lib) =
-    match List.hd fun_decl.signature.inputs with
-    | TRef (_, TAdt { id; _ }, _) ->
-        (constructors, fun_decls, Types.TypeDeclId.Map.add id fun_decl drops)
-    | _ -> lib
-  in
   (* Trait methods can be called by safe code, except for [Drop::drop]; closures
      are not part of the API *)
   let is_callable : UllbcAst.fun_source -> bool = function
@@ -55,20 +43,20 @@ let get () =
   let is_constructor ({ signature = { inputs; _ }; _ } : UllbcAst.fun_decl) =
     List.for_all Summary.Context.is_base_ty inputs
   in
-  let update_fun_decls (fun_decl : UllbcAst.fun_decl)
-      (constructors, fun_decls, drops) =
-    if is_constructor fun_decl then (fun_decl :: constructors, fun_decls, drops)
-    else (constructors, fun_decl :: fun_decls, drops)
+  let update_fun_decls (fun_decl : UllbcAst.fun_decl) (constructors, fun_decls)
+      =
+    if is_constructor fun_decl then (fun_decl :: constructors, fun_decls)
+    else (constructors, fun_decl :: fun_decls)
   in
-  let constructors, fun_decls, drops =
+  let constructors, fun_decls =
     Types.FunDeclId.Map.fold
       (fun _ (fun_decl : UllbcAst.fun_decl) library ->
-        if is_drop fun_decl then update_drops fun_decl library
+        if Drop.is_drop fun_decl then library
         else if can_infer fun_decl then update_fun_decls fun_decl library
         else library)
-      crate.fun_decls
-      ([], [], Types.TypeDeclId.Map.empty)
+      crate.fun_decls ([], [])
   in
+  let drops = Drop.get (constructors @ fun_decls) in
   let wrap = List.map (Wrapper.make drops) in
   { constructors = wrap constructors; fun_decls = wrap fun_decls }
 
