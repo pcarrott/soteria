@@ -3,8 +3,15 @@
 (library
  (package ruxt)
  (name ruxt_lib)
- (libraries cmdliner soteria_rust_lib)
- (flags :standard -open Soteria.Soteria_std -open Soteria.Bv_values)
+ (libraries cmdliner soteria_rust_lib ruxt_charon)
+ (flags
+  :standard
+  -open
+  Soteria.Soteria_std
+  -open
+  Soteria.Bv_values
+  -open
+  Ruxt_charon)
  (preprocess
   (pps ppx_deriving.std ppx_subliner soteria.ppx ppx_matches))
  (instrumentation

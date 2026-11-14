@@ -1,7 +1,11 @@
-open Soteria_rust_lib
 open Charon
-module Typed = Svalue.Typed
-module Sv = Typed.Svalue
+open Soteria_rust_lib
+
+module Typed = struct
+  include Svalue.Typed
+
+  let rename_tvars f v = Expr.of_value (Adt.map_poly f (type_ v))
+end
 
 module Value = struct
   type t = Typed.T.any Typed.t
@@ -16,6 +20,7 @@ module Value = struct
   let as_ptr : t -> [< Typed.T.sptr_f ] Typed.t = Typed.cast_ptr_f
   let sem_eq : t -> t -> Typed.sbool Typed.t = Typed.sem_eq
   let learn_eq (syn : syn) (ret : t) = Rustsymex.Consumer.learn_eq syn ret
+  let rename_tvars f : syn -> syn = Typed.rename_tvars f
 
   let nondet (ty : Types.ty) : t Rustsymex.t =
     let open Rustsymex.Syntax in
@@ -68,24 +73,25 @@ type syn = Value.syn expr
 
 let result = function Value (_, v) -> v | Call { result; _ } -> result
 
-let rec map_values f = function
-  | Value (ty, v) -> Value (ty, f v)
+let rec map_values t f = function
+  | Value (ty, v) -> Value (t ty, f v)
   | Call { fun_decl; args; ret; stmts; result } ->
-      let args = List.map (map_values_arg f) args in
-      let stmts = List.map (map_values_stmt f) stmts in
+      let args = List.map (map_values_arg t f) args in
+      let stmts = List.map (map_values_stmt t f) stmts in
       Call { fun_decl; args; ret = f ret; stmts; result = f result }
 
-and map_values_arg f (ref_kind, value) = (ref_kind, map_values f value)
+and map_values_arg t f (ref_kind, value) = (ref_kind, map_values t f value)
 
-and map_values_stmt f = function
+and map_values_stmt t f = function
   | Drop var -> Drop (f var)
   | Keep (keep, var) -> Keep (f keep, f var)
   | Read (var, copy) -> Read (f var, Option.map f copy)
   | Write (var, value, old) ->
-      Write (f var, map_values f value, Option.map f old)
+      Write (f var, map_values t f value, Option.map f old)
 
-let to_syn : t -> syn = map_values Value.to_syn
-let subst : (Value.syn -> Value.t) -> syn -> t = map_values
+let to_syn : t -> syn = map_values Fun.id Value.to_syn
+let subst : (Value.syn -> Value.t) -> syn -> t = map_values Fun.id
+let rename_tvars f : syn -> syn = map_values (Types.map_ty f) Fun.id
 
 (** {2 The witness monad}
 
@@ -200,6 +206,8 @@ let rec pp_ty ft (ty : Types.ty) =
   | TArray (ty, len, _) ->
       Fmt.pf ft "[%a; %a]" pp_ty ty Crate.pp_constant_expr len
   | TSlice (ty, _) -> Fmt.pf ft "[%a]" pp_ty ty
+  (* The types of a witness are inferred from its opaque values *)
+  | TVar _ -> Fmt.string ft "_"
   | _ -> Crate.mk_pp PrintFmt.pp_ty ft ty
 
 and pp_adt ~turbofish ft ({ id; generics; builtin } : Types.type_decl_ref) =
@@ -256,8 +264,8 @@ let pp_fun ft ({ item_meta = { name; is_local; _ }; _ } : UllbcAst.fun_decl) =
     of each call before running it. *)
 
 let pp_var ft (v : Value.syn) =
-  match Sv.kind v with
-  | Var var -> Fmt.pf ft "v%d" (Sv.Var.to_int var)
+  match Typed.Svalue.kind v with
+  | Var var -> Fmt.pf ft "v%d" (Typed.Svalue.Var.to_int var)
   | _ -> Fmt.failwith "Expected a variable in the witness: %a" Value.pp_syn v
 
 (* The variables that the witness [w] borrows mutably *)
@@ -279,6 +287,7 @@ let stmt_var = function
 (* Prints the statements running the witness [w]; [top] holds if nothing refers
    to the result of [w] *)
 let rec pp_stmts ~pp_value ~muts ~top ft w =
+  let module Sv = Typed.Svalue in
   let pp_let ft var =
     let mut_ = if List.exists (Sv.equal var) muts then "mut " else "" in
     Fmt.pf ft "let %s%a = " mut_ pp_var var
@@ -334,11 +343,44 @@ let pp_syn ft (w : syn) =
 
 type program = string
 
+(* A type variable is instantiated by a local struct of this name, with the size
+   of its layout *)
+let pp_ty_var ft id = Fmt.pf ft "T%d" (Types.TypeVarId.to_int id)
+
+(* The type variables of the opaque values of the witness [w] *)
+let rec ty_vars = function
+  | Value (TVar (Free id), _) -> [ id ]
+  | Value _ -> []
+  | Call { args; stmts; _ } ->
+      List.concat_map (fun (_, value) -> ty_vars value) args
+      @ List.concat_map
+          (function Write (_, value, _) -> ty_vars value | _ -> [])
+          stmts
+
 (** A test running the statements of the witness [w], with the values in a model
-    of the path condition [pcs]. *)
-let program ~pcs (w : t) : program =
+    of the path condition [pcs], and type variables of the sizes in [layouts] in
+    that model. *)
+let program ~pcs ?(layouts = []) (w : t) : program =
   let w = to_syn w in
+  let ids = List.sort_uniq Stdlib.compare (ty_vars w) in
+  (* Type variables are zero-sized, or else of size one, when [pcs] allows it *)
+  let pcs =
+    let open Typed.Infix in
+    let open Typed.Syntax in
+    ListLabels.fold_left ids ~init:pcs ~f:(fun pcs id ->
+        match List.assoc_opt id layouts with
+        | None -> pcs
+        | Some size -> (
+            let with_size n =
+              let pcs = Typed.Expr.of_value (size ==@ n) :: pcs in
+              Option.map (fun _ -> pcs) (Rustsymex.MonoSymex.model ~pcs)
+            in
+            match with_size Usize.(0s) with
+            | Some pcs -> pcs
+            | None -> Option.value ~default:pcs (with_size Usize.(1s))))
+  in
   let model = Rustsymex.MonoSymex.model ~pcs in
+  let module Sv = Typed.Svalue in
   (* Variables that are not in the model are not constrained by [pcs], so they
      can take any value *)
   let concrete model (v : Value.syn) =
@@ -356,10 +398,21 @@ let program ~pcs (w : t) : program =
     Typed.Expr.of_value
     @@ fst (Typed.Expr.Subst.apply ~missing_var Typed.Expr.Subst.empty v)
   in
+  let size id =
+    let open Syntaxes.Option in
+    let* model = model in
+    let* size = List.assoc_opt id layouts in
+    Sv.BitVec.to_z (concrete model (Typed.Expr.of_value size))
+  in
   let pp_value ft ((ty : Types.ty), (v : Value.syn)) =
     let c = Option.map (fun model -> concrete model v) model in
     let bits = Option.bind Sv.BitVec.to_z c in
     match (ty, bits) with
+    | TVar (Free id), _ -> (
+        match size id with
+        | Some n when Z.gt n Z.zero ->
+            Fmt.pf ft "%a([0; %a])" pp_ty_var id Z.pp_print n
+        | _ -> pp_ty_var ft id)
     | TScalar TBool, Some bits -> Fmt.bool ft (not (Z.equal bits Z.zero))
     | TScalar TChar, Some bits -> Fmt.pf ft "'\\u{%s}'" (Z.format "%x" bits)
     | TScalar (TInteger (Signed ty)), Some bits ->
@@ -380,7 +433,15 @@ let program ~pcs (w : t) : program =
   let buf = Buffer.create 512 in
   let buf_ft = Format.formatter_of_buffer buf in
   Format.pp_set_geometry buf_ft ~max_indent:9998 ~margin:9999;
-  Fmt.pf buf_ft "@[<v>#[test]@,@[<v 4>fn witness() {%a@]@,}@]@?"
+  let pp_struct ft id =
+    match size id with
+    | Some n when Z.gt n Z.zero ->
+        Fmt.pf ft "@,struct %a([u8; %a]);" pp_ty_var id Z.pp_print n
+    | _ -> Fmt.pf ft "@,struct %a;" pp_ty_var id
+  in
+  Fmt.pf buf_ft "@[<v>#[test]@,@[<v 4>fn witness() {%a%a@]@,}@]@?"
+    (Fmt.list ~sep:Fmt.nop pp_struct)
+    ids
     (pp_stmts ~pp_value ~muts:(mut_vars w) ~top:true)
     w;
   Buffer.contents buf

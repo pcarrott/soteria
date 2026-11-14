@@ -1,0 +1,4 @@
+(library
+ (package ruxt)
+ (name ruxt_charon)
+ (libraries charon))

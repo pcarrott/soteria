@@ -1,3 +1,4 @@
+open Charon
 open Soteria.Soteria_std
 open Syntaxes.FunctionWrap
 module Config_ = Config
@@ -6,7 +7,6 @@ open Soteria_rust_lib
 module Config = Config_
 module Interp = Interp_
 open Result.Syntax
-open Charon
 
 type t = {
   constructors : (Wrapper.t * Types.ty list) list;
@@ -28,14 +28,20 @@ let get () =
         | _ -> true)
     | _ -> false
   in
-  (* Polymorphic functions are not supported yet *)
-  let is_monomorphic (generics : Types.generic_params) =
-    List.is_empty generics.types && List.is_empty generics.const_generics
+  (* Const generics and type variables with trait bounds, other than the
+     implicit [Destruct] bound, are not supported yet *)
+  let is_supported_generics (generics : Types.generic_params) =
+    List.is_empty generics.const_generics
+    && List.for_all
+         (fun (clause : Types.trait_param) ->
+           let decl = Crate.get_trait_decl clause.trait.binder_value in
+           decl.item_meta.lang_item = Some RustcLangItemDestruct)
+         generics.trait_clauses
   in
   let can_infer ({ src; item_meta; signature; generics; _ } : UllbcAst.fun_decl)
       =
     is_callable src
-    && is_monomorphic generics
+    && is_supported_generics generics
     && item_meta.is_local
     && (not signature.is_unsafe)
     && (item_meta.attr_info.public || not (Config.get ()).only_public)
@@ -52,7 +58,9 @@ let get () =
     Types.FunDeclId.Map.fold
       (fun _ (fun_decl : UllbcAst.fun_decl) library ->
         if Drop.is_drop fun_decl then library
-        else if can_infer fun_decl then update_fun_decls fun_decl library
+        else if can_infer fun_decl then
+          let signature = Common.Charon_util.entry_signature fun_decl in
+          update_fun_decls { fun_decl with signature } library
         else library)
       crate.fun_decls ([], [])
   in

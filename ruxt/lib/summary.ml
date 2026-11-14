@@ -1,12 +1,46 @@
+open Charon
+module Config_ = Config
 open Soteria.Soteria_std
 open Syntaxes.FunctionWrap
-module Config_ = Config
 open Soteria_rust_lib
 module Config = Config_
-module Typed = Svalue.Typed
+module Typed = Witness.Typed
 
 module State = struct
   include State.Tree_state.Make (Tree_borrows.Concrete.Make)
+
+  let rename_tvars f : syn -> syn =
+    let mem_val : Tree_block.MemVal.syn -> Tree_block.MemVal.syn = function
+      | SScalar v -> SScalar (Typed.rename_tvars f v)
+      | SAggregate (v, ty) ->
+          SAggregate (Typed.rename_tvars f v, Types.map_ty f ty)
+      | v -> v
+    in
+    let block : Tree_block.syn -> Tree_block.syn = function
+      | MemVal m -> MemVal { m with v = mem_val m.v }
+      | Bound _ as b -> b
+    in
+    function
+    | Ser_opaques (id, (owned, dropped)) ->
+        Ser_opaques
+          ( f id,
+            ( List.map (Typed.rename_tvars f) owned,
+              List.map (Typed.rename_tvars f) dropped ) )
+    | Ser_pointers (Sptr.DecayMap.Ser_layouts (id, size)) ->
+        Ser_pointers (Sptr.DecayMap.Ser_layouts (f id, size))
+    | Ser_heap (loc, ({ node = Alive (Ser_block b); _ } as heap)) ->
+        Ser_heap (loc, { heap with node = Alive (Ser_block (block b)) })
+    | syn -> syn
+
+  let opaque_syn id v = Ser_opaques (id, ([ v ], []))
+
+  let owns_free_tvar (ty : Types.ty) (spatial : syn list) =
+    List.exists
+      (function
+        | Ser_opaques (id, (owned, _)) ->
+            not (List.is_empty owned || Types.mentions id ty)
+        | Ser_heap _ | Ser_pointers _ -> false)
+      spatial
 end
 
 module Logic = struct
@@ -14,6 +48,11 @@ module Logic = struct
 
   module Asrt = struct
     include Asrt
+
+    let rename_tvars f_syn f asrt =
+      ListLabels.map asrt ~f:(function
+        | Spatial syn -> Spatial (f_syn f syn)
+        | Pure v -> Pure (Typed.rename_tvars f v))
 
     module Execute =
       Execute_partial
@@ -45,25 +84,38 @@ let pp fmt = function
         (Logic.Asrt.pp State.pp_syn)
         asrt Witness.pp_syn witness
 
-let nondet (ty : Charon.Types.ty) : t list =
+let nondet (ty : Types.ty) : t list =
   Rustsymex.run ~stats:Caller ~mode:UX @@ Value.nondet ty
   |> ListLabels.map ~f:(function ret, pure ->
       let ret = Value.to_syn ret in
-      let asrt = Logic.Asrt.make ~spatial:[] ~pure in
+      let asrt =
+        let opaque id = State.opaque_syn id ret in
+        Logic.Asrt.make ~pure
+          ~spatial:(match ty with TVar (Free id) -> [ opaque id ] | _ -> [])
+      in
       let witness = Witness.Value (ty, ret) in
       { ret; asrt; witness })
 
 let make (ret : Value.t) (witness : Witness.t) (st : State.SM.st)
-    ~(forgotten : Value.t list) (pcs : Typed.Expr.t list) :
-    (t, [> `MemoryLeak ]) result =
+    (pcs : Typed.Expr.t list) ~(forgotten : Value.t list) ~(ty : Types.ty)
+    ~(sized : Types.type_var_id list) : (t, [> `MemoryLeak ]) result =
   let open Result.Syntax in
   let ret = Value.to_syn ret in
-  let witness = Witness.to_syn witness in
   let spatial = State.to_syn @@ State.of_opt st in
   let forgotten = List.map Value.to_syn forgotten in
   let check_leaks = not (Config.get ()).ignore_leaks in
-  let+ spatial, pure = Prune.prune ~check_leaks ~ret ~forgotten ~pcs spatial in
+  let* spatial, pure =
+    Prune.prune ~check_leaks ~sized ~ret ~forgotten ~pcs spatial
+  in
+  let+ () =
+    (* Owned values of a type variable that [ty] does not mention are leaked, as
+       the value of the summary cannot hold them. *)
+    if check_leaks && State.owns_free_tvar ty spatial then
+      Result.error `MemoryLeak
+    else Result.ok ()
+  in
   let asrt = Logic.Asrt.make ~spatial ~pure in
+  let witness = Witness.to_syn witness in
   { ret; asrt; witness }
 
 let produce (summ : t) (st : State.SM.st) :
@@ -77,8 +129,11 @@ let produce (summ : t) (st : State.SM.st) :
 let consume (summ : t) (ret : Value.t) (st : State.SM.st) :
     (State.SM.st, State.syn list) Rustsymex.Consumer.t =
   let open Rustsymex.Consumer.Syntax in
+  (* The sizes in a pointer depend on the layouts of the type variables: the
+     atoms that bind them have to be consumed before learning from [ret]. *)
+  let* remaining, st = Logic.Asrt.Execute.consume_partial summ.asrt st in
   let* () = Value.learn_eq summ.ret ret in
-  Logic.Asrt.Execute.consume summ.asrt st
+  Logic.Asrt.Execute.consume remaining st
 
 let implies ?names s_pre s_post =
   let section_name =
@@ -103,13 +158,24 @@ let implies ?names s_pre s_post =
   (* If the check is not supported, conservatively keep both summaries *)
   | exception Soteria.Symex.Gave_up _ -> false
 
+(* Renames the type variables of [summ] with [f]. *)
+let rename_tvars f (summ : t) : t =
+  {
+    ret = Value.rename_tvars f summ.ret;
+    asrt = Logic.Asrt.rename_tvars State.rename_tvars f summ.asrt;
+    witness = Witness.rename_tvars f summ.witness;
+  }
+
 module Context = struct
-  open Charon.Types
-  module M = TypeDeclId.Map
+  module M = Stdlib.Map.Make (struct
+    type t = Types.ty
+
+    let compare = Types.compare_ty
+  end)
 
   exception TypeNotSupported
 
-  let type_not_supported (_ : ty) = raise TypeNotSupported
+  let type_not_supported (_ : Types.ty) = raise TypeNotSupported
 
   (* Each custom type has separate lists for visited, unvisited and staged
      summaries *)
@@ -117,18 +183,22 @@ module Context = struct
   type nonrec t = (t list * t list * t list) M.t
 
   let empty : t = M.empty
-  let is_base_ty ty = match ty with TScalar _ -> true | _ -> false
+
+  let is_base_ty ty =
+    match ty with Types.(TScalar _ | TVar _) -> true | _ -> false
 
   let ( let@ ) (ty, default) f =
-    match ty with TAdt { id; _ } -> f id | _ -> default
+    match ty with Types.TAdt _ -> f () | _ -> default
 
   let find ty (ctx : t) : value =
     match ty with
-    | TAdt { id; _ } ->
+    | Types.TAdt _ ->
+        let key = Types.canonical ty in
         let visited, unvisited, staged =
-          Option.value ~default:([], [], []) (M.find_opt id ctx)
+          Option.value ~default:([], [], []) (M.find_opt key ctx)
         in
-        Custom (visited, unvisited, staged)
+        let inst = List.map (rename_tvars (Types.of_canonical ty)) in
+        Custom (inst visited, inst unvisited, inst staged)
     | ty when is_base_ty ty -> Base (nondet ty)
     | ty -> type_not_supported ty
 
@@ -156,7 +226,9 @@ module Context = struct
     with TypeNotSupported -> ()
 
   let stage ty summ (ctx : t) : t =
-    let@ id = (ty, ctx) in
+    let@ () = (ty, ctx) in
+    let key = Types.canonical ty in
+    let summ = rename_tvars (Types.to_canonical ty) summ in
     let exception SummaryAlreadyExists in
     let[@tail_mod_cons] rec filter i = function
       | [] -> []
@@ -178,7 +250,7 @@ module Context = struct
             Some (filter 0 visited, filter 0 unvisited, summ :: filter 0 staged)
           with SummaryAlreadyExists -> summs)
     in
-    M.update id opt_cons ctx
+    M.update key opt_cons ctx
 
   let commit (ctx : t) : t = M.map (fun (v, u, s) -> (u @ v, s, [])) ctx
 
@@ -188,10 +260,11 @@ module Context = struct
         Fmt.pf fmt "@[<v 2>%s:@ %a@]" kind (Fmt.list ~sep:Fmt.cut pp) summs
 
   let pp fmt (ctx : t) =
-    let pp_entry fmt (id, (visited, unvisited, staged)) =
-      Fmt.pf fmt "@[<v 2>%a:@ %a@ %a@ %a@]" Crate.pp_name
-        (Crate.get_adt_raw id).item_meta.name (pp_summs "visited") visited
-        (pp_summs "unvisited") unvisited (pp_summs "staged") staged
+    let pp_entry fmt (key, (visited, unvisited, staged)) =
+      Fmt.pf fmt "@[<v 2>%a:@ %a@ %a@ %a@]"
+        (Crate.mk_pp PrintFmt.pp_ty)
+        key (pp_summs "visited") visited (pp_summs "unvisited") unvisited
+        (pp_summs "staged") staged
     in
     Fmt.pf fmt "@[<v>%a@]" (Fmt.list ~sep:Fmt.cut pp_entry) (M.bindings ctx)
 end

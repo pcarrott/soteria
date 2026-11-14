@@ -1,7 +1,7 @@
+open Charon
 open Soteria_rust_lib
 module State = Summary.State
-module Typed = Svalue.Typed
-open Charon
+module Typed = Summary.Typed
 
 (** {2 Which types need drop} *)
 
@@ -104,6 +104,8 @@ let rec needs_drop ?(seen = []) ?(foreign = false) drops (ty : Types.ty) =
     | TArray (ty, _, _) -> aux ~foreign drops ty
     | TRawPtr _ -> if foreign then Unknown else No
     | TTraitType _ | TDynTrait _ | TSlice _ -> Unknown
+    (* A value of a type variable is opaque, and owned until dropped *)
+    | TVar (Free _) -> Yes
     | _ -> No
 
 (* The types that a value of type [ty] is dropped through, when it needs drop *)
@@ -268,6 +270,9 @@ struct
               exec_drop_glue (Types.TypeDeclId.Map.find id drops.impls) ty ptr
             in
             drop_fields ~boxes drops ty ptr
+        | TVar (Free id) ->
+            let**^ v = State.load (Summary.Value.as_ptr ptr) ty in
+            M.lift_state @@ State.drop_opaque id v
         | _ -> drop_fields ~boxes drops ty ptr)
 
   (* Drops the fields of the value at [ptr] in place, those of its current

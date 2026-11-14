@@ -1,10 +1,12 @@
+open Charon
 open Soteria.Soteria_std
 module Interp_ = Interp
+module Config_ = Config
 open Soteria_rust_lib
 module Interp = Interp_
+module Config = Config_
 module State = Summary.State
 module SM = Interp.StateM
-open Charon
 open SM.Syntax
 
 type fn =
@@ -81,6 +83,7 @@ let branch drops ty wrapper =
         (* Case 1: we learn from this reference and drop the rest *)
         let branch () =
           let** () =
+            (* The return value goes first: it may borrow from the arguments *)
             let** () = drop_ret () in
             let** () = drops in
             SM.Result.fold_list arg_ptrs ~init:() ~f:(fun () -> drop_ptr)
@@ -115,25 +118,51 @@ let make drops (fun_decl : UllbcAst.fun_decl) : t * Types.ty list =
   in
   ({ name = fun_decl.item_meta.name; fn }, tys)
 
+(* The layouts of the type variables in the heap state [st] *)
+let layouts st =
+  Sptr.DecayMap.get_layouts (State.of_opt st).pointers
+  |> Layout.Ctx.of_opt
+  |> Layout.Ctx.syntactic_bindings
+  |> List.of_seq
+
+(* The type variables whose layout may not be zero-sized on the current path.
+   Values of a type variable only lose their identity in memory on paths where
+   its size is zero. *)
+let sized_ty_vars () : Types.type_var_id list SM.t =
+  let open Summary.Typed.Infix in
+  let* st = SM.get_heap () in
+  SM.lift
+  @@ Rustsymex.fold_list ~init:[] (layouts st) ~f:(fun acc (id, size) ->
+      Rustsymex.map
+        (fun zero -> if zero then acc else id :: acc)
+        (Rustsymex.assert_ (size ==@ Summary.Typed.Syntax.Usize.(0s))))
+
 let exec ~fuel ({ fn; name = _ } : t) summs =
   (* Symbolically execute the wrapped function call *)
-  SM.Result.run @@ fn summs
+  SM.Result.run
+    (let** res = fn summs in
+     (* Only the leak check needs the sized type variables *)
+     let* sized =
+       if (Config.get ()).ignore_leaks then SM.return [] else sized_ty_vars ()
+     in
+     SM.Result.ok (res, sized))
   |> Rustsymex.run ~stats:Caller ~mode:UX ~fuel
   |> Monad.ResultM.fold_list ~init:[] ~f:(fun summs -> function
     (* Values that borrow from the arguments are not supported yet, as the
        arguments are dropped after the call: no summary is inferred *)
     | ( ( Compo_res.Ok
-            ((Types.TAdt { generics = { regions = _ :: _; _ }; _ }, _), _),
+            (((Types.TAdt { generics = { regions = _ :: _; _ }; _ }, _), _), _),
           _ ),
         _ ) ->
         Ok summs
     (* Successful termination: a new summary can been inferred *)
-    | (Compo_res.Ok ((ty, ret), (state, forgotten)), witness), pcs ->
+    | (Compo_res.Ok (((ty, ret), sized), (state, forgotten)), witness), pcs ->
         let open Result.Syntax in
         let+ summ =
-          Summary.make ret witness state ~forgotten pcs
+          Summary.make ~ty ~sized ret witness state ~forgotten pcs
           |> Result.map_error (fun `MemoryLeak ->
-              `MemoryLeak (Witness.program ~pcs witness))
+              `MemoryLeak
+                (Witness.program ~pcs ~layouts:(layouts state) witness))
         in
         (ty, summ) :: summs
     (* Panics are safe, but they do not produce a summary either *)
@@ -143,5 +172,8 @@ let exec ~fuel ({ fn; name = _ } : t) summs =
              e ->
         Ok summs
     (* Unsuccessful termination: found a type unsoundness *)
-    | ((Compo_res.Error _ | Missing _), witness), pcs ->
+    | (Compo_res.Error (_, (state, _)), witness), pcs ->
+        Result.error
+          (`TypeUnsound (Witness.program ~pcs ~layouts:(layouts state) witness))
+    | (Missing _, witness), pcs ->
         Result.error (`TypeUnsound (Witness.program ~pcs witness)))

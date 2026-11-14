@@ -76,6 +76,19 @@ pointer owns nothing. A type of another crate that holds
 a pointer, like `Vec`, may own it through a `Drop` impl that was not translated: it
 is forgotten instead, and the blocks reachable from it are not reported as leaks.
 
+**Type variables** (`summary.ml`, `charon_ext/`). A function argument whose type
+is a type variable `T` gets an opaque summary, which owns a value of `T`.
+Summaries are stored by type up to a one-to-one renaming of type variables:
+`Pair<T, U>` and `Pair<U, T>` share their summaries, unlike `Pair<T, T>`. They
+are renamed to the type variables of the function they are passed to. The
+layouts of the type variables are part of the state of a summary. An owned
+value of `T` is a memory leak if it is unreachable and `T` is not zero-sized on
+that path, or if the type of the summary does not mention `T`. Type variables
+with trait bounds other than the implicit `Destruct`, and const generics, are
+not supported: such functions are skipped. In a witness, a type variable is
+instantiated with a local struct: a unit struct when it may be zero-sized, or
+else a struct of the size of its layout in a model of the path condition.
+
 **Subsumption** (`Summary.Context.stage`). A new summary is discarded if it
 implies an existing summary of the same type, and existing summaries implied
 by the new one are removed.

@@ -1,7 +1,7 @@
+open Charon
 open Soteria_rust_lib
 module State = Summary.State
-module Typed = Svalue.Typed
-open Charon
+module Typed = Summary.Typed
 module Rust_interp = Interp.Make (State)
 
 (* [State.SM] over the witness monad: the heap state is run before the witness
