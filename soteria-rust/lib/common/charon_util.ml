@@ -283,3 +283,19 @@ let pp_span_data ft ({ file; beg_loc; end_loc } : Meta.span_data) =
   Fmt.pf ft "%a:%a" pp_filename file
     (Soteria.Logs.Printers.pp_unstable ~name:"range" pp_range)
     (beg_loc, end_loc)
+
+(** The generic arguments an entry point runs with: its generic parameters, as
+    free variables *)
+let entry_generics (fun_decl : UllbcAst.fun_decl) : Types.generic_args =
+  TypesUtils.generic_args_of_params () fun_decl.generics
+
+(** The signature of an entry point as it runs, instantiated with
+    {!entry_generics} *)
+let entry_signature (fun_decl : UllbcAst.fun_decl) : Types.fun_sig =
+  let open Substitute in
+  let subst =
+    make_sb_subst_from_generics fun_decl.generics (entry_generics fun_decl) Self
+  in
+  st_substitute_visitor#visit_fun_sig
+    (subst_at_binder_zero subst)
+    fun_decl.signature

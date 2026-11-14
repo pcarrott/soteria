@@ -1496,8 +1496,7 @@ module Make (StateImpl : State.S) = struct
         let received = List.length args in
         error (`InvalidFnArgCount (expected, received))
     in
-    let generics = TypesUtils.generic_args_of_params () fundef.generics in
-    exec_real_fun fundef generics args
+    exec_real_fun fundef (entry_generics fundef) args
 
   let exec_fun_compo ~args ~state (fundef : UllbcAst.fun_decl) =
     let@ () = run ~env:() ~state in
