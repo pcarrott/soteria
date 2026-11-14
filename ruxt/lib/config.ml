@@ -205,7 +205,7 @@ let set_and_lock_global (config : global) =
           list_tests = false;
           show_pcs = config.ruxt.show_pcs;
           show_manifest_summaries = false;
-          (* Ignore leaks in Soteria, we implement our own leak check *)
+          (* RUXt performs its own leak check, when building summaries *)
           ignore_leaks = true;
           (* Tree borrows are not supported *)
           ignore_aliasing = true;

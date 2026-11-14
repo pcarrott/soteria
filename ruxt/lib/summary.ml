@@ -7,17 +7,6 @@ module Typed = Svalue.Typed
 
 module State = struct
   include State.Tree_state.Make (Tree_borrows.Concrete.Make)
-
-  (* The location variables of a block, and the variables it points to *)
-  let iter_vars syn =
-    let ins, outs = ins_outs syn in
-    let iter_vars_l l =
-      Iter.of_list l |> Iter.flat_map StateKey.Svalue.iter_vars
-    in
-    let is_loc (_, ty) = [%matches? Soteria.Bv_values.Svalue.TLoc _] ty in
-    let ins = Iter.persistent_lazy (iter_vars_l ins) in
-    ( Iter.filter is_loc ins,
-      Iter.append (Iter.filter (Fun.negate is_loc) ins) (iter_vars_l outs) )
 end
 
 module Logic = struct
@@ -42,6 +31,7 @@ module Logic = struct
 end
 
 module Value = Witness.Value
+module Prune = Prune.Make (State)
 
 type t = {
   ret : Value.syn;
@@ -63,116 +53,6 @@ let nondet (ty : Charon.Types.ty) : t list =
       let witness = Witness.Value (ty, ret) in
       { ret; asrt; witness })
 
-module Var_graph = struct
-  include Soteria.Soteria_std.Graph.Make_in_place (Typed.Svalue.Var)
-
-  (* For each equality [e1 = e2] in the path condition, we add a double edge
-     from all variables of [e1] to all variables of [e2] *)
-  let add_pc_edges graph pcs =
-    ListLabels.iter pcs ~f:(fun v ->
-        match Typed.Svalue.kind v with
-        | Binop (Eq, el, er) ->
-            (* We make the second iterator peristent to avoid going over the
-               structure too many times if there are many *)
-            let r_iter = Iter.persistent_lazy @@ Typed.Svalue.iter_vars er in
-            let product = Iter.product (Typed.Svalue.iter_vars el) r_iter in
-            product (fun ((x, _), (y, _)) -> add_double_edge graph x y)
-        | _ -> ())
-end
-
-module Var_hashset = Var_graph.Node_set
-
-(* For each block $l -> B in the post state, we add a single-sided arrow from
-   the location variables in $l to all variables contained in B.
-
-   For each decayed pointer $l -> i, we add a double edge from the location
-   variables in $l to all variables in i. *)
-let add_block_edges graph spatial =
-  ListLabels.iter spatial ~f:(fun syn ->
-      let locs, outs = State.iter_vars syn in
-      let add_edge =
-        match syn with
-        | State.Ser_heap _ | State.Ser_opaques _ -> Var_graph.add_edge graph
-        | State.Ser_pointers _ -> Var_graph.add_double_edge graph
-      in
-      Iter.product locs (Iter.persistent_lazy outs) (fun ((x, _), (y, _)) ->
-          add_edge x y))
-
-(* The reachability graph of variables, following path condition equalities and
-   the contents of the blocks of the post state. *)
-let var_graph ~spatial ~pcs =
-  let graph = Var_graph.with_node_capacity 0 in
-  Var_graph.add_pc_edges graph pcs;
-  add_block_edges graph spatial;
-  graph
-
-(* The variables reachable in [graph] from those of [values] *)
-let reachable_vars graph values =
-  let init_reachable = Var_hashset.with_capacity 0 in
-  ListLabels.iter values ~f:(fun v ->
-      Value.iter_vars v (fun (x, _) -> Var_hashset.add init_reachable x));
-  Var_graph.reachable_from graph init_reachable
-
-let is_leak =
-  [%matches?
-    State.Ser_heap
-      ( _,
-        State.Freeable_block_with_meta.
-          {
-            (* A leak occurs when an unreachable pointer is alive *)
-            node = Soteria.Sym_states.Freeable.Alive _;
-            (* PEDRO: Is this good enough? Do I need info on globals? *)
-            info = Some { kind = Heap; _ };
-            _;
-          } )]
-
-(* Keeps only the blocks of the post state whose location is reachable; a
-   dropped block that is still alive on the heap is a memory leak, unless it is
-   reachable from a forgotten value, whose drop may have freed it. *)
-let reachable_blocks_or_leaks ~reachable ~forgotten spatial =
-  let reaches set syn =
-    let locs, _ = State.iter_vars syn in
-    Iter.exists (fun (x, _) -> Var_hashset.mem set x) locs
-  in
-  let kept, dropped = ListLabels.partition spatial ~f:(reaches reachable) in
-  let dropped = ListLabels.filter dropped ~f:(Fun.negate (reaches forgotten)) in
-  if (Config.get ()).ignore_leaks then Result.ok kept
-  else
-    Monad.ResultM.fold_list dropped ~init:kept ~f:(fun kept syn ->
-        if is_leak syn then Result.error `MemoryLeak else Result.ok kept)
-
-(* The location of each block of the post state. *)
-let locs_of_spatial spatial =
-  ListLabels.fold_left spatial ~init:[] ~f:(fun acc -> function
-    | State.Ser_heap (loc, _) when not (List.mem loc acc) -> loc :: acc
-    | State.Ser_heap _ | State.Ser_pointers _ | State.Ser_opaques _ -> acc)
-
-(* The path condition atoms that mention a reachable variable, minus the
-   [distinct] atoms that the single distinct assertion over [locs] subsumes. *)
-let relevant_pcs ~reachable ~locs pcs =
-  ListLabels.filter_map pcs ~f:(fun v ->
-      (* Ignore assertions with unreachable variables *)
-      if
-        Iter.exists (fun (var, _) -> Var_hashset.mem reachable var)
-        @@ Typed.Svalue.iter_vars v
-      then
-        match Typed.Svalue.kind v with
-        | Nop (Distinct, l) ->
-            (* Replace all distincts with a single distinct assertion *)
-            if List.for_all (fun sv -> List.mem sv locs) l then None else Some v
-        | _ -> Some v
-      else None)
-
-(* The pure part of the summary: the relevant path condition atoms, preceded by
-   a single assertion stating that all locations are distinct. *)
-let pure_of_pcs ~reachable ~spatial pcs =
-  let locs = locs_of_spatial spatial in
-  let filtered = relevant_pcs ~reachable ~locs pcs in
-  let distinct = Typed.Svalue.Bool.distinct locs in
-  match Typed.Svalue.Bool.to_bool distinct with
-  | Some true -> filtered
-  | _ -> distinct :: filtered
-
 let make (ret : Value.t) (witness : Witness.t) (st : State.SM.st)
     ~(forgotten : Value.t list) (pcs : Typed.Expr.t list) :
     (t, [> `MemoryLeak ]) result =
@@ -180,12 +60,9 @@ let make (ret : Value.t) (witness : Witness.t) (st : State.SM.st)
   let ret = Value.to_syn ret in
   let witness = Witness.to_syn witness in
   let spatial = State.to_syn @@ State.of_opt st in
-  let graph = var_graph ~spatial ~pcs in
-  let reachable = reachable_vars graph [ ret ] in
-  let forgotten = reachable_vars graph (List.map Value.to_syn forgotten) in
-  (* We can now filter the summary to keep only the reachable values *)
-  let+ spatial = reachable_blocks_or_leaks ~reachable ~forgotten spatial in
-  let pure = pure_of_pcs ~reachable ~spatial pcs in
+  let forgotten = List.map Value.to_syn forgotten in
+  let check_leaks = not (Config.get ()).ignore_leaks in
+  let+ spatial, pure = Prune.prune ~check_leaks ~ret ~forgotten ~pcs spatial in
   let asrt = Logic.Asrt.make ~spatial ~pure in
   { ret; asrt; witness }
 
