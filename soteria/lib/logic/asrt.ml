@@ -129,10 +129,10 @@ module M (Symex : Symex.Base) = struct
   module Execute_partial
       (B : Base)
       (Syn : sig
+        (** [mk_exists binders exprs] is the conjunction of [exprs], where
+            [binders] are bound by an existential quantifier. *)
         val mk_exists :
-          (Var.t * 'a Value.ty) list -> Value.Expr.t -> Value.Expr.t
-
-        val conj : Value.Expr.t list -> Value.Expr.t
+          (Var.t * 'a Value.ty) list -> Value.Expr.t list -> Value.Expr.t
       end) =
   struct
     include Execute (B)
@@ -152,7 +152,7 @@ module M (Symex : Symex.Base) = struct
             |> ignore);
         !r
       in
-      Syn.mk_exists free_vars @@ Syn.conj exprs
+      Syn.mk_exists free_vars exprs
 
     let consume (asrt : B.syn t) (st : B.t option) :
         (B.t option, B.syn list) Consumer.t =

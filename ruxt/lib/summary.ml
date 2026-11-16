@@ -58,13 +58,11 @@ module Logic = struct
       Execute_partial
         (State)
         (struct
-          let mk_exists binders body =
+          let mk_exists binders exprs =
             let binders =
               List.map (fun (var, ty) -> (var, Typed.untype_type ty)) binders
             in
-            Typed.Svalue.Bool.mk_exists binders body
-
-          let conj = Typed.Svalue.Bool.conj
+            Typed.Svalue.Bool.mk_exists binders (Typed.Svalue.Bool.conj exprs)
         end)
   end
 end
