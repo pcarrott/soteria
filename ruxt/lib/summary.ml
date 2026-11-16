@@ -110,7 +110,56 @@ let consume (summ : t) (ret : Value.t) (st : State.SM.st) :
   let* () = Value.learn_eq summ.ret ret in
   Logic.Asrt.Execute.consume remaining st
 
+(* Whether the values [v1] and [v2] may be equal: they have no different
+   variants or constants at the same position *)
+let rec may_equal v1 v2 =
+  match (Typed.Svalue.kind v1, Typed.Svalue.kind v2) with
+  | Extension (Svalue.Ext.Tuple l1), Extension (Svalue.Ext.Tuple l2) ->
+      may_equal_list l1 l2
+  | ( Extension (Svalue.Ext.Enum (var1, l1)),
+      Extension (Svalue.Ext.Enum (var2, l2)) ) ->
+      Types.equal_variant_id var1 var2 && may_equal_list l1 l2
+  | BitVec z1, BitVec z2 -> Z.equal z1 z2
+  | Bool b1, Bool b2 -> Bool.equal b1 b2
+  | _ -> true
+
+and may_equal_list l1 l2 =
+  List.compare_lengths l1 l2 <> 0 || List.for_all2 may_equal l1 l2
+
+(* The number of heap blocks of [summ] *)
+let num_blocks (summ : t) =
+  List.filter_map
+    (function
+      | (Spatial (State.Ser_heap (loc, _)) : State.syn Logic.Asrt.atom) ->
+          Some loc
+      | Spatial _ | Pure _ -> None)
+    summ.asrt
+  |> List.sort_uniq Typed.Svalue.compare
+  |> List.length
+
+(* Necessary conditions for [s_pre] to imply [s_post], checked syntactically:
+   their values may be equal, and the blocks of [s_post] are consumed by
+   distinct blocks of [s_pre], which must all be consumed. *)
+let may_imply s_pre s_post =
+  may_equal s_pre.ret s_post.ret && num_blocks s_pre = num_blocks s_post
+
+(* Whether the state [st] left after consuming a summary is empty, but for
+   unexposed decays and layouts of type variables. They only fix the address of
+   a block, or the layout of a type variable, which a state without them can
+   still give it when it is first needed. *)
+let is_empty_but_decays (st : State.SM.st) =
+  List.for_all
+    (function
+      | State.Ser_pointers
+          ( Sptr.DecayMap.Ser_decays (_, { exposed = false; _ })
+          | Sptr.DecayMap.Ser_layouts _ ) ->
+          true
+      | _ -> false)
+    (State.to_syn (State.of_opt st))
+
 let implies ?names s_pre s_post =
+  may_imply s_pre s_post
+  &&
   let section_name =
     match names with
     | Some (pre, post) -> Fmt.str "Checking %s implies %s" pre post
@@ -127,9 +176,16 @@ let implies ?names s_pre s_post =
     in
     Rustsymex.Consumer.run ~subst @@ consume s_post ret st
   in
+  (* The implication holds if every branch consumes [s_post] entirely *)
   match Rustsymex.run ~stats:Caller ~mode:OX process with
-  | [ (Soteria.Soteria_std.Compo_res.Ok (st, _), _) ] -> st = State.empty
-  | _ -> false
+  | [] -> false
+  | branches ->
+      List.for_all
+        (function
+          | Soteria.Soteria_std.Compo_res.Ok (st, _), _ ->
+              is_empty_but_decays st
+          | _ -> false)
+        branches
   (* If the check is not supported, conservatively keep both summaries *)
   | exception Soteria.Symex.Gave_up _ -> false
 
