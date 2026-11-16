@@ -9,9 +9,9 @@ Test RUXt in the standard library's LinkedList
   #[test]
   fn witness() {
       struct T0;
-      let mut v12 = crate::LinkedList::<_>::new();
-      crate::LinkedList::<_>::push_front(&mut v12, T0);
-      crate::LinkedList::<_>::cycle(&mut v12);
-      std::mem::drop(v12);
+      let mut v6 = crate::LinkedList::<_>::new();
+      crate::LinkedList::<_>::push_front(&mut v6, T0);
+      crate::LinkedList::<_>::cycle(&mut v6);
+      std::mem::drop(v6);
   }
   [1]

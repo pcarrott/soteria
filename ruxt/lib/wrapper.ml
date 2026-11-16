@@ -43,6 +43,13 @@ let call (fun_decl : UllbcAst.fun_decl) summs =
 
 let return drops ty summ wrapper =
   let** ret, arg_ptrs = wrapper in
+  (* The return value must be valid. It is checked before the arguments are
+     dropped, as its references may borrow from them; the values behind
+     reference arguments are checked when they are read. *)
+  let**^ () =
+    State.with_loc_err ~trace:"Return value validity" () (fun () ->
+        State.check_validity ~check_refs:false ty ret)
+  in
   let++ () =
     match ty with
     | Types.TRef (_, ty, RShared) ->
@@ -56,6 +63,13 @@ let return drops ty summ wrapper =
   in
   (ret, arg_ptrs)
 
+(* The layouts of the type variables in the heap state [st] *)
+let layouts st =
+  Sptr.DecayMap.get_layouts (State.of_opt st).pointers
+  |> Layout.Ctx.of_opt
+  |> Layout.Ctx.syntactic_bindings
+  |> List.of_seq
+
 let branch drops ty wrapper =
   (* Obtain the result from the executing the function call *)
   let** ret, arg_ptrs = wrapper in
@@ -63,11 +77,27 @@ let branch drops ty wrapper =
   let drop_ret () = Interp.exec_drop drops ty (`Value ret) in
   (* Drop a reference argument *)
   let drop_ptr (ty, ptr, var) = Interp.exec_drop drops ty ~var (`Place ptr) in
-  (* Tie the inferred safe value to a fresh symbolic value *)
-  let lift_nondet ty ret =
-    let* nondet = SM.lift @@ Summary.Value.nondet ty in
-    let* () = SM.assume [ Summary.Value.sem_eq nondet ret ] in
-    SM.Result.ok (ty, nondet)
+  (* The inferred safe value, whose validity has been checked, constrains the
+     allocation information of its pointers. When implications between summaries
+     can learn all of its variables, it is kept as is, so that its structure,
+     and the locations of the blocks it points to, can be learned. Otherwise, it
+     is tied to a fresh symbolic value, which can always be learned.
+
+     This is decided for the whole value: a value that points to blocks of the
+     heap but also holds a part that cannot be learned is tied to a fresh value,
+     which hides the locations of its blocks, so implications that consume them
+     fail. *)
+  let assume_valid ty ret =
+    (* The layouts of the type variables are learned before the value *)
+    let* st = SM.get_heap () in
+    let known = List.map snd (layouts st) in
+    if Summary.Value.is_learnable ~known ret then
+      let* () = SM.lift @@ Summary.Value.assume_valid ty ret in
+      SM.Result.ok (ty, ret)
+    else
+      let* nondet = SM.lift @@ Summary.Value.nondet ty in
+      let* () = SM.assume [ Summary.Value.sem_eq nondet ret ] in
+      SM.Result.ok (ty, nondet)
   in
   (* For each reference, we create an execution branch that returns the stored
      value and drops everything else, including the return value *)
@@ -76,7 +106,7 @@ let branch drops ty wrapper =
         (* Case 0: we learn from the return value, the rest has been dropped *)
         let branch () =
           let** () = drops in
-          lift_nondet ty ret
+          assume_valid ty ret
         in
         branch :: acc
     | (ty, ptr, var) :: arg_ptrs ->
@@ -90,7 +120,7 @@ let branch drops ty wrapper =
           in
           let* () = SM.set_result var in
           let** ret = SM.unbox ty ptr in
-          lift_nondet ty ret
+          assume_valid ty ret
         in
         (* Case 2: we learn nothing from this reference, so we drop it *)
         let drops =
@@ -117,13 +147,6 @@ let make drops (fun_decl : UllbcAst.fun_decl) : t * Types.ty list =
     call fun_decl summs |> return drops ty summ |> branch drops ty
   in
   ({ name = fun_decl.item_meta.name; fn }, tys)
-
-(* The layouts of the type variables in the heap state [st] *)
-let layouts st =
-  Sptr.DecayMap.get_layouts (State.of_opt st).pointers
-  |> Layout.Ctx.of_opt
-  |> Layout.Ctx.syntactic_bindings
-  |> List.of_seq
 
 (* The type variables whose layout may not be zero-sized on the current path.
    Values of a type variable only lose their identity in memory on paths where

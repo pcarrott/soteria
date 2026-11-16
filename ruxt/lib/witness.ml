@@ -30,6 +30,47 @@ module Value = struct
     match res with
     | Soteria.Soteria_std.Compo_res.Ok ret -> Rustsymex.return ret
     | _ -> failwith "Expected Ok in nondet"
+
+  (* Whether all the variables of [v] can be learned when it is matched against
+     another value, as when checking implications between summaries, where the
+     variables of [known] have already been learned. This is the learnability
+     test of consumption, applied to a placeholder value. *)
+  let is_learnable ~known (v : t) =
+    let learn_var subst (x, ty) =
+      let var = Typed.mk_var x ty in
+      match subst with
+      | Some subst -> Typed.Expr.Subst.learn subst (Typed.Expr.of_value var) var
+      | None -> None
+    in
+    let known =
+      Iter.of_list known
+      |> Iter.flat_map Typed.iter_vars
+      |> Iter.fold learn_var (Some Typed.Expr.Subst.empty)
+    in
+    let syn = to_syn v in
+    let placeholder =
+      Typed.mk_var (Soteria.Symex.Var.of_int 0) (Typed.Expr.ty syn)
+    in
+    match known with
+    | Some subst ->
+        Option.is_some (Typed.Expr.Subst.learn subst syn placeholder)
+    | None -> false
+
+  (* Assumes the validity invariants of [ty] for [v], including the constraints
+     on the allocation information of its pointers, which only describe how
+     pointers are represented *)
+  let assume_valid (ty : Types.ty) (v : t) : unit Rustsymex.t =
+    let open Rustsymex.Syntax in
+    let* res, _ =
+      Layout.SM.run_with_state ~state:None
+        (Value_codec.validity ~alloc_info:true ty v (fun c _err ->
+             let open Layout.SM.Syntax in
+             let+ () = Layout.SM.assume [ c ] in
+             Soteria.Soteria_std.Compo_res.Ok ()))
+    in
+    match res with
+    | Soteria.Soteria_std.Compo_res.Ok () -> Rustsymex.return ()
+    | _ -> failwith "Expected Ok in assume_valid"
 end
 
 (** A witness is either a primitive value or a function call preceded by the

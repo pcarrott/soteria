@@ -6,8 +6,8 @@ Test RUXt with opaque summaries of type variables
   fn witness() {
       struct T0;
       struct T1;
-      let v8 = crate::pair(T1, T0);
-      crate::boom(v8);
+      let v6 = crate::pair(T1, T0);
+      crate::boom(v6);
   }
   [1]
   $ ruxt same_var.rs
@@ -19,8 +19,8 @@ Test RUXt with opaque summaries of type variables
   #[test]
   fn witness() {
       struct T0;
-      let v7 = crate::same(T0, T0);
-      crate::boom(v7);
+      let v5 = crate::same(T0, T0);
+      crate::boom(v5);
   }
   [1]
   $ ruxt heap.rs --pass-fuel 2
@@ -38,8 +38,8 @@ Test RUXt with opaque summaries of type variables
   #[test]
   fn witness() {
       struct T0([u8; 1]);
-      let v10 = crate::new(T0([0; 1]));
-      crate::read_after_free(v10);
+      let v6 = crate::new(T0([0; 1]));
+      crate::read_after_free(v6);
   }
   [1]
   $ ruxt default_method.rs --ignore-leaks

@@ -28,9 +28,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v9 = crate::new(0i32);
-      crate::peek(&v9);
-      std::mem::drop(v9);
+      let v5 = crate::new(0i32);
+      crate::peek(&v5);
+      std::mem::drop(v5);
   }
   [1]
   $ ruxt non_null.rs
@@ -38,9 +38,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v9 = crate::new(0i32);
-      crate::peek(&v9);
-      std::mem::drop(v9);
+      let v5 = crate::new(0i32);
+      crate::peek(&v5);
+      std::mem::drop(v5);
   }
   [1]
   $ ruxt manually_drop.rs
@@ -48,9 +48,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v9 = crate::new(0i32);
-      crate::peek(&v9);
-      std::mem::drop(v9);
+      let v5 = crate::new(0i32);
+      crate::peek(&v5);
+      std::mem::drop(v5);
   }
   [1]
   $ ruxt noop_drop.rs
@@ -58,9 +58,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v9 = crate::new(0i32);
-      crate::peek(&v9);
-      std::mem::drop(v9);
+      let v5 = crate::new(0i32);
+      crate::peek(&v5);
+      std::mem::drop(v5);
   }
   [1]
 
@@ -70,9 +70,9 @@ Dropping from the structure still finds errors
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let v13 = crate::new(0i32);
-      crate::peek(&v13);
-      std::mem::drop(v13);
+      let v5 = crate::new(0i32);
+      crate::peek(&v5);
+      std::mem::drop(v5);
   }
   [1]
 
@@ -97,9 +97,9 @@ Values whose drop cannot be run are only dropped at the end of the witness
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v8 = crate::new();
-      crate::leak(&v8);
-      let _v22 = v8;
+      let v2 = crate::new();
+      crate::leak(&v2);
+      let _v16 = v2;
   }
   [1]
 
@@ -110,10 +110,10 @@ retag otherwise
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v5 = crate::new(0i32);
-      let v1 = crate::get_p(&v5);
-      let _v16 = *v1;
-      std::mem::drop(v5);
+      let v3 = crate::new(0i32);
+      let v1 = crate::get_p(&v3);
+      let _v14 = *v1;
+      std::mem::drop(v3);
   }
   [1]
   $ ruxt read_ref.rs
@@ -121,10 +121,10 @@ retag otherwise
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v9 = crate::new(0i32);
-      let v1 = crate::get(&v9);
+      let v5 = crate::new(0i32);
+      let v1 = crate::get(&v5);
       std::hint::black_box(v1);
-      std::mem::drop(v9);
+      std::mem::drop(v5);
   }
   [1]
 
@@ -134,10 +134,10 @@ Writes through returned mutable references replace the old value
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let mut v10 = crate::new();
-      let v1 = crate::get(&mut v10);
-      let v26 = crate::mk();
-      std::mem::drop(std::mem::replace(v1, v26));
-      std::mem::drop(v10);
+      let mut v6 = crate::new();
+      let v1 = crate::get(&mut v6);
+      let v18 = crate::mk();
+      std::mem::drop(std::mem::replace(v1, v18));
+      std::mem::drop(v6);
   }
   [1]

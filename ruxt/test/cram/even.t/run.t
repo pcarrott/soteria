@@ -4,9 +4,9 @@ Test RUXt in even example
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let mut v5 = crate::new(-1i32);
-      crate::succ(&mut v5);
-      crate::noop(v5);
+      let mut v4 = crate::new(-1i32);
+      crate::succ(&mut v4);
+      crate::noop(v4);
   }
   [1]
 
@@ -19,9 +19,9 @@ Test RUXt in even example
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let mut v5 = crate::new(-1i32);
-      crate::succ(&mut v5);
-      crate::noop(v5);
+      let mut v4 = crate::new(-1i32);
+      crate::succ(&mut v4);
+      crate::noop(v4);
   }
   [1]
 
