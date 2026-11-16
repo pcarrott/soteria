@@ -5,6 +5,7 @@ open Syntaxes.FunctionWrap
 open Soteria_rust_lib
 module Config = Config_
 module Typed = Witness.Typed
+module Value = Witness.Value
 
 module State = struct
   include State.Tree_state.Make (Tree_borrows.Concrete.Make)
@@ -43,32 +44,8 @@ module State = struct
       spatial
 end
 
-module Logic = struct
-  include Soteria.Logic.Make (Rustsymex)
-
-  module Asrt = struct
-    include Asrt
-
-    let rename_tvars f_syn f asrt =
-      ListLabels.map asrt ~f:(function
-        | Spatial syn -> Spatial (f_syn f syn)
-        | Pure v -> Pure (Typed.rename_tvars f v))
-
-    module Execute =
-      Execute_partial
-        (State)
-        (struct
-          let mk_exists binders exprs =
-            let binders =
-              List.map (fun (var, ty) -> (var, Typed.untype_type ty)) binders
-            in
-            Typed.Svalue.Bool.mk_exists binders (Typed.Svalue.Bool.conj exprs)
-        end)
-  end
-end
-
-module Value = Witness.Value
 module Prune = Prune.Make (State)
+module Logic = Logic.Make (State)
 
 type t = {
   ret : Value.syn;
