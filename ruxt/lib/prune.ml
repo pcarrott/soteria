@@ -121,14 +121,39 @@ module Make (State : State) = struct
 
   (** {2 Pruning} *)
 
+  (* The values of the type variable [id] that are still reachable. An
+     unreachable value can never be used again: a dropped one is forgotten, and
+     an owned one of a zero-sized type variable, whose identity is lost, stands
+     for any value of its type variable. *)
+  let reachable_opaques leaks id (owned, dropped) =
+    let reached v =
+      Iter.exists
+        (fun (x, _) ->
+          Var_hashset.mem leaks.reachable x || Var_hashset.mem leaks.forgotten x)
+        (Typed.Svalue.iter_vars v)
+    in
+    let zero_sized =
+      not (List.exists (Types.TypeVarId.equal_id id) leaks.sized)
+    in
+    let owned =
+      ListLabels.map owned ~f:(fun v ->
+          if zero_sized && not (reached v) then
+            Typed.Expr.of_value (Typed.Adt.mk_poly id)
+          else v)
+    in
+    (owned, List.filter reached dropped)
+
   (* Keeps only the blocks of the post state whose location is reachable, and
      fails if any of them is leaked. *)
   let reachable_blocks_or_leaks ~check_leaks leaks spatial =
     Monad.ResultM.fold_list spatial ~init:[] ~f:(fun kept syn ->
         match syn with
         | _ when check_leaks && is_leak leaks syn -> Result.error `MemoryLeak
-        | State.Ser_opaques _ | Ser_pointers (Sptr.DecayMap.Ser_layouts _) ->
-            Result.ok (syn :: kept)
+        | State.Ser_opaques (id, opaques) ->
+            Result.ok
+              (State.Ser_opaques (id, reachable_opaques leaks id opaques)
+              :: kept)
+        | Ser_pointers (Sptr.DecayMap.Ser_layouts _) -> Result.ok (syn :: kept)
         | _ when reaches (Var_hashset.mem leaks.reachable) syn ->
             Result.ok (syn :: kept)
         | _ -> Result.ok kept)
