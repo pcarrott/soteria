@@ -140,29 +140,88 @@ module Make (State : State) = struct
       | State.Ser_heap (loc, _) when not (List.mem loc acc) -> loc :: acc
       | State.Ser_heap _ | State.Ser_pointers _ | State.Ser_opaques _ -> acc)
 
-  (* The path condition atoms that mention a reachable variable, minus the
-     [distinct] atoms that the single distinct assertion over [locs]
-     subsumes. *)
-  let relevant_pcs ~reachable ~locs pcs =
-    ListLabels.filter_map pcs ~f:(fun v ->
-        (* Ignore assertions with unreachable variables *)
-        if
+  (* The location variable [sv], if it is one *)
+  let as_loc_var sv =
+    match Typed.Svalue.kind sv with
+    | Var x
+      when Iter.exists
+             (fun (_, ty) -> [%matches? Soteria.Bv_values.Svalue.TLoc _] ty)
+             (Typed.Svalue.iter_vars sv) ->
+        Some x
+    | _ -> None
+
+  (* The values that [v] states to be pairwise distinct, if it is a [distinct]
+     or a disequality *)
+  let diseq_elems v =
+    match Typed.Svalue.kind v with
+    | Nop (Distinct, l) -> Some l
+    | Unop (Not, e) -> (
+        match Typed.Svalue.kind e with
+        | Binop (Eq, l, r) -> Some [ l; r ]
+        | _ -> None)
+    | _ -> None
+
+  (* The unreachable location variables of [pcs] that do not occur in [spatial]
+     and only occur in [pcs] as elements of [distinct] atoms and disequalities.
+     Such a variable can always be given an address distinct from all others, so
+     removing it from these atoms eliminates its existential exactly. *)
+  let droppable_locs ~reachable ~pcs ~spatial =
+    let candidates = Var_hashset.with_capacity 0 in
+    let blocked = Var_hashset.with_capacity 0 in
+    let block sv =
+      Typed.Svalue.iter_vars sv (fun (x, _) -> Var_hashset.add blocked x)
+    in
+    ListLabels.iter spatial ~f:(fun syn ->
+        let locs, outs = iter_vars syn in
+        Iter.append locs outs (fun (x, _) -> Var_hashset.add blocked x));
+    ListLabels.iter pcs ~f:(fun v ->
+        match diseq_elems v with
+        | Some l ->
+            ListLabels.iter l ~f:(fun sv ->
+                match as_loc_var sv with
+                | Some x when not (Var_hashset.mem reachable x) ->
+                    Var_hashset.add candidates x
+                | _ -> block sv)
+        | None -> block v);
+    fun sv ->
+      match as_loc_var sv with
+      | Some x ->
+          Var_hashset.mem candidates x && not (Var_hashset.mem blocked x)
+      | None -> false
+
+  (* The path condition atoms that mention a reachable variable, where
+     [distinct] atoms and disequalities are projected away from the droppable
+     location variables, minus the [distinct] atoms that the single distinct
+     assertion over [locs] subsumes. *)
+  let relevant_pcs ~reachable ~spatial ~locs pcs =
+    (* Ignore assertions with unreachable variables *)
+    let pcs =
+      ListLabels.filter pcs ~f:(fun v ->
           Iter.exists (fun (var, _) -> Var_hashset.mem reachable var)
-          @@ Typed.Svalue.iter_vars v
-        then
-          match Typed.Svalue.kind v with
-          | Nop (Distinct, l) ->
-              (* Replace all distincts with a single distinct assertion *)
-              if List.for_all (fun sv -> List.mem sv locs) l then None
-              else Some v
-          | _ -> Some v
-        else None)
+          @@ Typed.Svalue.iter_vars v)
+    in
+    let droppable = droppable_locs ~reachable ~pcs ~spatial in
+    ListLabels.filter_map pcs ~f:(fun v ->
+        match Typed.Svalue.kind v with
+        | Nop (Distinct, l) -> (
+            let l' = List.filter (Fun.negate droppable) l in
+            match l' with
+            | [] | [ _ ] -> None
+            (* Replace all distincts with a single distinct assertion *)
+            | _ when List.for_all (fun sv -> List.mem sv locs) l' -> None
+            | _ when List.compare_lengths l l' = 0 -> Some v
+            | _ -> Some (Typed.Svalue.Bool.distinct l'))
+        | Unop (Not, e) -> (
+            match Typed.Svalue.kind e with
+            | Binop (Eq, l, r) when droppable l || droppable r -> None
+            | _ -> Some v)
+        | _ -> Some v)
 
   (* The pure part of the summary: the relevant path condition atoms, preceded
      by a single assertion stating that all locations are distinct. *)
   let pure_of_pcs ~reachable ~spatial pcs =
     let locs = locs_of_spatial spatial in
-    let filtered = relevant_pcs ~reachable ~locs pcs in
+    let filtered = relevant_pcs ~reachable ~spatial ~locs pcs in
     let distinct = Typed.Svalue.Bool.distinct locs in
     match Typed.Svalue.Bool.to_bool distinct with
     | Some true -> filtered

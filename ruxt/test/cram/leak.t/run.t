@@ -28,9 +28,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v16 = crate::new(0i32);
-      crate::peek(&v16);
-      std::mem::drop(v16);
+      let v9 = crate::new(0i32);
+      crate::peek(&v9);
+      std::mem::drop(v9);
   }
   [1]
   $ ruxt non_null.rs
@@ -38,9 +38,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v16 = crate::new(0i32);
-      crate::peek(&v16);
-      std::mem::drop(v16);
+      let v9 = crate::new(0i32);
+      crate::peek(&v9);
+      std::mem::drop(v9);
   }
   [1]
   $ ruxt manually_drop.rs
@@ -48,9 +48,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v15 = crate::new(0i32);
-      crate::peek(&v15);
-      std::mem::drop(v15);
+      let v9 = crate::new(0i32);
+      crate::peek(&v9);
+      std::mem::drop(v9);
   }
   [1]
   $ ruxt noop_drop.rs
@@ -58,9 +58,9 @@ These leak, as nothing frees the block
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v16 = crate::new(0i32);
-      crate::peek(&v16);
-      std::mem::drop(v16);
+      let v9 = crate::new(0i32);
+      crate::peek(&v9);
+      std::mem::drop(v9);
   }
   [1]
 
@@ -70,9 +70,9 @@ Dropping from the structure still finds errors
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let v20 = crate::new(0i32);
-      crate::peek(&v20);
-      std::mem::drop(v20);
+      let v13 = crate::new(0i32);
+      crate::peek(&v13);
+      std::mem::drop(v13);
   }
   [1]
 
@@ -121,10 +121,10 @@ retag otherwise
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let v15 = crate::new(0i32);
-      let v1 = crate::get(&v15);
+      let v9 = crate::new(0i32);
+      let v1 = crate::get(&v9);
       std::hint::black_box(v1);
-      std::mem::drop(v15);
+      std::mem::drop(v9);
   }
   [1]
 
@@ -134,10 +134,10 @@ Writes through returned mutable references replace the old value
   Found memory leak, witnessed by:
   #[test]
   fn witness() {
-      let mut v21 = crate::new();
-      let v1 = crate::get(&mut v21);
-      let v43 = crate::mk();
-      std::mem::drop(std::mem::replace(v1, v43));
-      std::mem::drop(v21);
+      let mut v10 = crate::new();
+      let v1 = crate::get(&mut v10);
+      let v26 = crate::mk();
+      std::mem::drop(std::mem::replace(v1, v26));
+      std::mem::drop(v10);
   }
   [1]

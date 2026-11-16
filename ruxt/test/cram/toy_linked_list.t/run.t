@@ -12,10 +12,10 @@ Test RUXt in toy_linked_list example
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let mut v16 = crate::LinkedList::new();
-      crate::LinkedList::push_front(&mut v16);
-      crate::LinkedList::cycle(&mut v16);
-      std::mem::drop(v16);
+      let mut v8 = crate::LinkedList::new();
+      crate::LinkedList::push_front(&mut v8);
+      crate::LinkedList::cycle(&mut v8);
+      std::mem::drop(v8);
   }
   [1]
 
@@ -24,9 +24,9 @@ Test RUXt in toy_linked_list example
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let mut v16 = crate::LinkedList::new();
-      crate::LinkedList::push_front(&mut v16);
-      crate::LinkedList::cycle(&mut v16);
-      std::mem::drop(v16);
+      let mut v8 = crate::LinkedList::new();
+      crate::LinkedList::push_front(&mut v8);
+      crate::LinkedList::cycle(&mut v8);
+      std::mem::drop(v8);
   }
   [1]

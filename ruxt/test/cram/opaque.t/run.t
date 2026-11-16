@@ -38,8 +38,8 @@ Test RUXt with opaque summaries of type variables
   #[test]
   fn witness() {
       struct T0([u8; 1]);
-      let v17 = crate::new(T0([0; 1]));
-      crate::read_after_free(v17);
+      let v10 = crate::new(T0([0; 1]));
+      crate::read_after_free(v10);
   }
   [1]
   $ ruxt default_method.rs --ignore-leaks

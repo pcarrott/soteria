@@ -8,9 +8,9 @@ Test RUXt in a monomorphised version of the standard library's LinkedList
   Found type unsoundness, witnessed by:
   #[test]
   fn witness() {
-      let mut v20 = crate::LinkedList::new();
-      crate::LinkedList::push_front(&mut v20, 0u32);
-      crate::LinkedList::cycle(&mut v20);
-      std::mem::drop(v20);
+      let mut v11 = crate::LinkedList::new();
+      crate::LinkedList::push_front(&mut v11, 0u32);
+      crate::LinkedList::cycle(&mut v11);
+      std::mem::drop(v11);
   }
   [1]
