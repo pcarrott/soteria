@@ -173,13 +173,14 @@ let exec ~fuel ({ fn; name = _ } : t) summs =
   |> Monad.ResultM.fold_list ~init:[] ~f:(fun summs -> function
     (* Values that borrow from the arguments are not supported yet, as the
        arguments are dropped after the call: no summary is inferred *)
-    | ( ( Compo_res.Ok
-            (((Types.TAdt { generics = { regions = _ :: _; _ }; _ }, _), _), _),
+    | ( ( ( Compo_res.Ok
+              ((Types.TAdt { generics = { regions = _ :: _; _ }; _ }, _), _),
+            _ ),
           _ ),
         _ ) ->
         Ok summs
     (* Successful termination: a new summary can been inferred *)
-    | (Compo_res.Ok (((ty, ret), sized), (state, forgotten)), witness), pcs ->
+    | ((Compo_res.Ok ((ty, ret), sized), (state, forgotten)), witness), pcs ->
         let open Result.Syntax in
         let+ summ =
           Summary.make ~ty ~sized ret witness state ~forgotten pcs
@@ -189,14 +190,12 @@ let exec ~fuel ({ fn; name = _ } : t) summs =
         in
         (ty, summ) :: summs
     (* Panics are safe, but they do not produce a summary either *)
-    | (Compo_res.Error ((e, _), _), _), _
+    | ((Compo_res.Error (e, _), _), _), _
       when [%matches?
              `Panic _ | `PanicCheck _ | `FailedAssert _ | `UnwindTerminate]
              e ->
         Ok summs
     (* Unsuccessful termination: found a type unsoundness *)
-    | (Compo_res.Error (_, (state, _)), witness), pcs ->
+    | ((Compo_res.(Error _ | Missing _), (state, _)), witness), pcs ->
         Result.error
-          (`TypeUnsound (Witness.program ~pcs ~layouts:(layouts state) witness))
-    | (Missing _, witness), pcs ->
-        Result.error (`TypeUnsound (Witness.program ~pcs witness)))
+          (`TypeUnsound (Witness.program ~pcs ~layouts:(layouts state) witness)))

@@ -217,7 +217,7 @@ let rec ty_vars = function
 
 (** Instantiates the witness [w] with a model of the path condition [pcs], and
     type variables of the sizes in [layouts] in that model. *)
-let program ~pcs ?(layouts = []) (w : t) : program =
+let program ~pcs ~layouts (w : t) : program =
   let w = to_syn w in
   let ids = List.sort_uniq Types.TypeVarId.compare_id (ty_vars w) in
   (* Type variables are zero-sized, or else of size one, when [pcs] allows it *)
@@ -370,28 +370,35 @@ let pp_ty_var ft id = Fmt.pf ft "T%d" (Types.TypeVarId.to_int id)
 let pp_program ft ({ witness; sizes } : program) =
   let module Sv = Typed.Svalue in
   let size id = List.assoc id sizes in
-  let pp_value ft ((ty : Types.ty), ((v, c) : Value.syn * Value.syn)) =
-    let bits = Sv.BitVec.to_z c in
-    match (ty, bits) with
-    | TVar (Free id), _ ->
+  (* The primitive values of a witness are scalars or opaque values, and the
+     model instantiates scalars with constants *)
+  let pp_value ft ((ty : Types.ty), ((_, c) : Value.syn * Value.syn)) =
+    let to_z = function
+      | Some bits -> bits
+      | None ->
+          Fmt.failwith "Expected a constant in the witness: %a" Value.pp_syn c
+    in
+    let bits () = to_z (Sv.BitVec.to_z c) in
+    match ty with
+    | TVar (Free id) ->
         let n = size id in
         if Z.gt n Z.zero then Fmt.pf ft "%a([0; %a])" pp_ty_var id Z.pp_print n
         else pp_ty_var ft id
-    | TScalar TBool, Some bits -> Fmt.bool ft (not (Z.equal bits Z.zero))
-    | TScalar TChar, Some bits -> Fmt.pf ft "'\\u{%s}'" (Z.format "%x" bits)
-    | TScalar (TInteger (Signed ty)), Some bits ->
-        let n = Sv.BitVec.bv_to_z true (Sv.size_of v.node.ty) bits in
+    | TScalar TBool -> Fmt.bool ft (not (Z.equal (bits ()) Z.zero))
+    | TScalar TChar -> Fmt.pf ft "'\\u{%s}'" (Z.format "%x" (bits ()))
+    | TScalar (TInteger (Signed ty)) ->
+        let n = Sv.BitVec.bv_to_z true (Sv.size_of c.node.ty) (bits ()) in
         Fmt.pf ft "%a%s" Z.pp_print n (PrintRust.int_ty_name ty)
-    | TScalar (TInteger (Unsigned ty)), Some bits ->
-        Fmt.pf ft "%a%s" Z.pp_print bits (PrintRust.u_int_ty_name ty)
-    | TScalar (TFloat ty), _ -> (
-        match Option.bind Sv.BitVec.to_z (Sv.Float.to_bits_opt c) with
-        | Some bits ->
-            Fmt.pf ft "%s::from_bits(%s)"
-              (PrintRust.float_ty_name ty)
-              (Z.format "%#x" bits)
-        | None -> Value.pp_syn ft v)
-    | _ -> Value.pp_syn ft v
+    | TScalar (TInteger (Unsigned ty)) ->
+        Fmt.pf ft "%a%s" Z.pp_print (bits ()) (PrintRust.u_int_ty_name ty)
+    | TScalar (TFloat ty) ->
+        let bits = to_z (Option.bind Sv.BitVec.to_z (Sv.Float.to_bits_opt c)) in
+        Fmt.pf ft "%s::from_bits(%s)"
+          (PrintRust.float_ty_name ty)
+          (Z.format "%#x" bits)
+    | _ ->
+        Fmt.failwith "Expected a scalar or opaque value in the witness: %a"
+          Value.pp_syn c
   in
   let buf = Buffer.create 512 in
   let buf_ft = Format.formatter_of_buffer buf in

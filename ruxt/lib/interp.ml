@@ -40,7 +40,7 @@ module StateM = struct
 
     (* Runs [x] from an empty heap and witness *)
     let run x =
-      run_with_state ~state:(State.empty, []) x
+      Base.run_with_state ~state:(State.empty, []) x
       |> Witness.WM.run_with_witness ~witness:Witness.empty
   end
 
