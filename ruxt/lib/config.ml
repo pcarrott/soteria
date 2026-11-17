@@ -170,11 +170,24 @@ type global = {
 
 let global_term = global_cmdliner_term ()
 
+(* Default solver timeout, in milliseconds; a timeout of 0 disables it *)
+let default_solver_timeout = 50
+
 let set_and_lock_global (config : global) =
   set_and_lock config.ruxt;
+  let soteria =
+    let solver = config.soteria.solver in
+    let solver_timeout =
+      match solver.solver_timeout with
+      | None -> Some default_solver_timeout
+      | Some 0 -> None
+      | timeout -> timeout
+    in
+    { config.soteria with solver = { solver with solver_timeout } }
+  in
   let (config : Soteria_rust_lib.Config.global) =
     {
-      soteria = config.soteria;
+      soteria;
       soteria_rust =
         {
           cleanup = config.ruxt.cleanup;

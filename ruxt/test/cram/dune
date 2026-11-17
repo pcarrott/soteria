@@ -2,7 +2,8 @@
  (_
   (env-vars
    (HIDE_UNSTABLE 1)
-   (SOTERIA_RUST_CLEANUP 1))))
+   (SOTERIA_RUST_CLEANUP 1)
+   (SOTERIA_SOLVER_TIMEOUT 0))))
 
 (cram
  (deps ../../bin/ruxt.exe)
